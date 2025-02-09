@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-from enum import Enum
 
 import torch
 import torch.nn.functional as F
@@ -7,29 +5,8 @@ from torch.nn import ModuleList
 from torch.nn.functional import log_softmax
 from torch_geometric.nn import MessagePassing, global_add_pool
 
+from bronze_age.config import Config, NetworkType
 
-class ActivationType(Enum):
-    GUMBEL = "gumbel"
-    ARGMAX = "argmax"
-
-class NetworkType(Enum):
-    LINEAR = "linear"
-    MLP = "mlp"
-
-@dataclass
-class ModelConfig:
-    temperature : float = 1.0
-    alpha : float  = 1.0
-    beta : float  = 0.0
-    dropout : float  = 0.0
-    use_batch_norm : float  = True
-    network : NetworkType = NetworkType.LINEAR
-    hidden_units : int = 16
-    state_size : int = 10
-    num_layers : int = 1
-    skip_connection : bool = False
-    use_pooling : bool = True
-    bounding_parameter : float = 10.0
 
 def to_float_tensor(x):
     if x is not torch.FloatTensor:
@@ -112,7 +89,7 @@ class MLP(torch.nn.Module):
 class SoftmaxLayer(torch.nn.Module):
     """For usage in StoneAgeGNNLayer"""
 
-    def __init__(self, out_channels, config: ModelConfig, linear_layer, use_batch_norm=None):
+    def __init__(self, out_channels, config: Config, linear_layer, use_batch_norm=None):
         super(SoftmaxLayer, self).__init__()
         self.__name__ = 'LinearSoftmax'
         self.lin1 = linear_layer
@@ -149,7 +126,7 @@ class SoftmaxLayer(torch.nn.Module):
 class LinearSoftmax(SoftmaxLayer):
     """For usage in StoneAgeGNNLayer"""
 
-    def __init__(self, in_channels, out_channels, config: ModelConfig, use_batch_norm=None):
+    def __init__(self, in_channels, out_channels, config: Config, use_batch_norm=None):
         linear_layer = torch.nn.Linear(in_channels, out_channels)
         super(LinearSoftmax, self).__init__(out_channels=out_channels, config=config, linear_layer=linear_layer, use_batch_norm=use_batch_norm)
         self.__name__ = 'LinearSoftmax'
@@ -157,20 +134,20 @@ class LinearSoftmax(SoftmaxLayer):
 class MLPSoftmax(SoftmaxLayer):
     """For usage in StoneAgeGNNLayer"""
 
-    def __init__(self, in_channels, out_channels, config: ModelConfig):
+    def __init__(self, in_channels, out_channels, config: Config):
         linear_layer = MLP(in_channels, config.hidden_units, out_channels, 2, config.dropout)
         super(MLPSoftmax, self).__init__(out_channels=out_channels, config=config, linear_layer=linear_layer, use_batch_norm=False)
         self.__name__ = 'MLPSoftmax'
 
 
 class InputLayer(LinearSoftmax):
-    def __init__(self, in_channels, out_channels, config: ModelConfig):
+    def __init__(self, in_channels, out_channels, config: Config):
         super(InputLayer, self).__init__(in_channels, out_channels, config, use_batch_norm=False)
         self.__name__ = 'InputLayer'
 
 
 class PoolingLayer(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, config: ModelConfig):
+    def __init__(self, in_channels, out_channels, config: Config):
         super(PoolingLayer, self).__init__()
         self.__name__ = 'PoolingLayer'
         if config.network == NetworkType.MLP:
@@ -185,7 +162,7 @@ class PoolingLayer(torch.nn.Module):
 
 class StoneAgeGNNLayer(MessagePassing):
 
-    def __init__(self, in_channels, out_channels, bounding_parameter, config: ModelConfig, index=0):
+    def __init__(self, in_channels, out_channels, bounding_parameter, config: Config, index=0):
         super().__init__(aggr='add')
         self.__name__ = 'stone-age-' + str(index)
         self.bounding_parameter = bounding_parameter
@@ -213,7 +190,7 @@ class StoneAgeGNNLayer(MessagePassing):
 
 
 class StoneAgeGNN(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, config: ModelConfig):
+    def __init__(self, in_channels, out_channels, config: Config):
         super().__init__()
 
         self.use_pooling = config.use_pooling

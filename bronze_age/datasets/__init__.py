@@ -82,9 +82,11 @@ class DatasetEnum(StrEnum):
     OGB_PPA = 'OGB-ppa'
     OGB_CODE2 = 'OGB-code2'
 
+    @property
     def uses_pooling(self):
         return _USES_POOLING[self]
     
+    @property
     def uses_mask(self):
         return _USES_MASK[self]
     
@@ -96,9 +98,9 @@ _DATASETS = {
     DatasetEnum.REDDIT_BINARY: lambda c: TUDataset(root=c.data_dir, name='REDDIT-BINARY', pre_transform=_add_features),
     DatasetEnum.MUTAGENICITY: lambda c: TUDataset(root=c.data_dir, name='Mutagenicity'),
     DatasetEnum.COLLAB: lambda c: TUDataset(root=c.data_dir, name='COLLAB', pre_transform=_add_features),
-    DatasetEnum.INFECTION: lambda c: CustomDataset([Infection(num_layers=c.number_of_layers).create_dataset(num_nodes=1000, edge_probability=0.004) for _ in range(10)]),
+    DatasetEnum.INFECTION: lambda c: CustomDataset([Infection(num_layers=c.num_layers).create_dataset(num_nodes=1000, edge_probability=0.004) for _ in range(10)]),
     DatasetEnum.BA_2MOTIFS: lambda c: SynGraphDataset(c.data_dir, 'BA_2Motifs', transform=_syn_graph_transform),    
-    DatasetEnum.SATURATION: lambda c: CustomDataset([Saturation(sample_count=1, num_layers=c.number_of_layers, concat_features=False, conv_type=None).create_dataset() for _ in range(10)]),
+    DatasetEnum.SATURATION: lambda c: CustomDataset([Saturation(sample_count=1, num_layers=c.num_layers, concat_features=False, conv_type=None).create_dataset() for _ in range(10)]),
     DatasetEnum.BA_SHAPES: lambda c: SynGraphDataset(c.data_dir, 'BA_shapes', transform=Compose([_syn_graph_transform, _x_to_float])),
     DatasetEnum.TREE_CYCLE: lambda c: SynGraphDataset(c.data_dir, 'Tree_Cycle', transform=Compose([_syn_graph_transform, _x_to_float])),
     DatasetEnum.TREE_GRID: lambda c: SynGraphDataset(c.data_dir, 'Tree_Grid', transform=Compose([_syn_graph_transform, _x_to_float])),
