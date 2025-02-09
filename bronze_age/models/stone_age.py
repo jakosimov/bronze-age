@@ -4,6 +4,7 @@ from torch.nn import ModuleList
 import numpy as np
 from enum import Enum
 from torch_geometric.nn import MessagePassing, global_add_pool
+from torch.nn.functional import log_softmax
 
 class ActivationType(Enum):
     GUMBEL = "gumbel"
@@ -102,16 +103,21 @@ class MLP(torch.nn.Module):
         x = self.lins[-1](x)
         return x
 
-
-class LinearSoftmax(torch.nn.Module):
+class SoftmaxLayer(torch.nn.Module):
     """For usage in StoneAgeGNNLayer"""
 
-    def __init__(self, in_channels, out_channels, config: ModelConfig):
-        super(LinearSoftmax, self).__init__()
+    def __init__(self, out_channels, config: ModelConfig, linear_layer, use_batch_norm=None):
+        super(SoftmaxLayer, self).__init__()
         self.__name__ = 'LinearSoftmax'
-        self.lin1 = torch.nn.Linear(in_channels, out_channels)
-        self.bn = torch.nn.BatchNorm1d(out_channels)
+        self.lin1 = linear_layer
         self.config = config
+        if use_batch_norm is None:
+            self.use_batch_norm = self.config.use_batch_norm
+        else:
+            self.use_batch_norm = use_batch_norm
+
+        if self.use_batch_norm:
+            self.bn = torch.nn.BatchNorm1d(out_channels)
 
     def use_argmax(self):
         # return self.config.activation == ActivationType.ARGMAX
@@ -120,7 +126,7 @@ class LinearSoftmax(torch.nn.Module):
     def forward(self, x):
         x = self.lin1(x)
 
-        if self.config.use_batch_norm:
+        if self.use_batch_norm:
             x = self.bn(x)
 
         if self.use_argmax():
@@ -134,59 +140,27 @@ class LinearSoftmax(torch.nn.Module):
             x = x_d
         return x
 
+class LinearSoftmax(SoftmaxLayer):
+    """For usage in StoneAgeGNNLayer"""
 
-class MLPSoftmax(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, config: ModelConfig, use_batch_norm=None):
+        linear_layer = torch.nn.Linear(in_channels, out_channels)
+        super(LinearSoftmax, self).__init__(out_channels=out_channels, config=config, linear_layer=linear_layer, use_batch_norm=use_batch_norm)
+        self.__name__ = 'LinearSoftmax'
+
+class MLPSoftmax(SoftmaxLayer):
     """For usage in StoneAgeGNNLayer"""
 
     def __init__(self, in_channels, out_channels, config: ModelConfig):
-        super(MLPSoftmax, self).__init__()
-        self.__name__ = 'LinearSoftmax'
-        self.config = config
-        self.mlp = MLP(in_channels, config.hidden_units, out_channels, 2, self.config.dropout)
+        linear_layer = MLP(in_channels, config.hidden_units, out_channels, 2, config.dropout)
+        super(MLPSoftmax, self).__init__(out_channels=out_channels, config=config, linear_layer=linear_layer, use_batch_norm=False)
+        self.__name__ = 'MLPSoftmax'
 
-    def use_argmax(self):
-        # return self.config.activation == ActivationType.ARGMAX
-        return not self.training
 
-    def forward(self, x):
-        x = self.mlp(x)
-        if self.use_argmax():
-            x_d = argmax(x)
-        else:
-            x_d = gumbel_softmax(x, hard=True, tau=self.config.temperature, beta=self.config.beta)
-
-        if np.random.random() > self.config.alpha and self.training:
-            x = (x + x_d) / 2
-        else:
-            x = x_d
-        return x
-
-class InputLayer(torch.nn.Module):
-    """Same as LinearSoftmax but without the batchnorm"""
-
+class InputLayer(LinearSoftmax):
     def __init__(self, in_channels, out_channels, config: ModelConfig):
-        super(InputLayer, self).__init__()
-        self.__name__ = 'FirstLayer'
-        self.lin1 = torch.nn.Linear(in_channels, out_channels)
-        self.config = config
-
-    def use_argmax(self):
-        # return self.config.activation == ActivationType.ARGMAX
-        return not self.training
-
-    def forward(self, x):
-        x = to_float_tensor(x)
-        x = self.lin1(x)
-        if self.use_argmax():
-            x_d = argmax(x)
-        else:
-            x_d = gumbel_softmax(x, hard=True, tau=self.config.temperature, beta=self.config.beta)
-
-        if np.random.random() > self.config.alpha and self.training:
-            x = (x + x_d) / 2
-        else:
-            x = x_d
-        return x
+        super(InputLayer, self).__init__(in_channels, out_channels, config, use_batch_norm=False)
+        self.__name__ = 'InputLayer'
 
 
 class PoolingLayer(torch.nn.Module):
