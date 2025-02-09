@@ -44,7 +44,7 @@ class Infection:
         max_dist = self.num_layers  # anything larger than max_dist has a far away label
         g = nx.erdos_renyi_graph(num_nodes, edge_probability, directed=True, seed=0)
         N = len(g.nodes())
-        infected_nodes = random.sample(g.nodes(), 50)
+        infected_nodes = random.sample(list(g.nodes()), 50)
         g.add_node('X')  # dummy node for easier computation, will be removed in the end
         for u in infected_nodes:
             g.add_edge('X', u)

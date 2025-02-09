@@ -8,3 +8,4 @@ from bronze_age.datasets import DatasetEnum
 class Config:
     dataset: DatasetEnum
     data_dir: Path
+    number_of_layers: int

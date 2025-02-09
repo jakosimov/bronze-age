@@ -25,33 +25,46 @@ dependencies:
   - ca-certificates=2025.1.31=hf0a4a13_0
   - cached-property=1.5.2=hd8ed1ab_1
   - cached_property=1.5.2=pyha770c72_1
+  - cairo=1.18.2=h6a3b0d2_1
   - certifi=2024.12.14=pyhd8ed1ab_0
   - cffi=1.17.1=py312h0fad829_0
+  - chardet=5.2.0=py312h81bd7bf_2
   - charset-normalizer=3.4.1=pyhd8ed1ab_0
   - colorama=0.4.6=pyhd8ed1ab_1
   - comm=0.2.2=pyhd8ed1ab_1
   - contourpy=1.3.1=py312hb23fbb9_0
   - cpython=3.12.8=py312hd8ed1ab_1
   - cycler=0.12.1=pyhd8ed1ab_1
+  - cyrus-sasl=2.1.27=h60b93bd_7
   - debugpy=1.8.12=py312hd8f9ff3_0
   - decorator=5.1.1=pyhd8ed1ab_1
   - defusedxml=0.7.1=pyhd8ed1ab_0
   - exceptiongroup=1.2.2=pyhd8ed1ab_1
   - executing=2.1.0=pyhd8ed1ab_1
   - filelock=3.17.0=pyhd8ed1ab_0
+  - font-ttf-dejavu-sans-mono=2.37=hab24e00_0
+  - font-ttf-inconsolata=3.000=h77eed37_0
+  - font-ttf-source-code-pro=2.038=h77eed37_0
+  - font-ttf-ubuntu=0.83=h77eed37_3
+  - fontconfig=2.15.0=h1383a14_1
+  - fonts-conda-ecosystem=1=0
+  - fonts-conda-forge=1=0
   - fonttools=4.56.0=py312h998013c_0
   - fqdn=1.5.1=pyhd8ed1ab_1
   - freetype=2.12.1=hadb7bae_2
+  - freetype-py=2.3.0=pyhd8ed1ab_0
   - frozenlist=1.5.0=py312h998013c_1
   - fsspec=2025.2.0=pyhd8ed1ab_0
   - gmp=6.3.0=h7bae524_2
   - gmpy2=2.1.5=py312h524cf62_3
+  - greenlet=3.1.1=py312hd8f9ff3_1
   - h11=0.14.0=pyhd8ed1ab_1
   - h2=4.2.0=pyhd8ed1ab_0
   - hpack=4.1.0=pyhd8ed1ab_0
   - httpcore=1.0.7=pyh29332c3_1
   - httpx=0.28.1=pyhd8ed1ab_0
   - hyperframe=6.1.0=pyhd8ed1ab_0
+  - icu=75.1=hfee45f7_0
   - idna=3.10=pyhd8ed1ab_1
   - importlib-metadata=8.6.1=pyha770c72_0
   - importlib_resources=6.5.2=pyhd8ed1ab_0
@@ -84,6 +97,8 @@ dependencies:
   - lerc=4.0.0=h9a09cb3_0
   - libabseil=20240722.0=cxx17_h07bc746_4
   - libblas=3.9.0=28_h10e41b3_openblas
+  - libboost=1.86.0=hc9fb7c5_3
+  - libboost-python=1.86.0=py312h72cd453_3
   - libbrotlicommon=1.1.0=hd74edd7_2
   - libbrotlidec=1.1.0=hd74edd7_2
   - libbrotlienc=1.1.0=hd74edd7_2
@@ -95,12 +110,18 @@ dependencies:
   - libffi=3.4.2=h3422bc3_5
   - libgfortran=5.0.0=13_2_0_hd922786_3
   - libgfortran5=13.2.0=hf226fd6_3
+  - libglib=2.82.2=hdff4504_1
+  - libiconv=1.17=h0d3ecfb_2
+  - libintl=0.23.1=h493aca8_0
   - libjpeg-turbo=3.0.0=hb547adb_1
   - liblapack=3.9.0=28_hc9a63f6_openblas
   - liblzma=5.6.4=h39f12f2_0
+  - libntlm=1.8=h5505292_0
   - libopenblas=0.3.28=openmp_hf332438_1
   - libpng=1.6.46=h3783ad8_0
+  - libpq=17.2=ha9b7db8_1
   - libprotobuf=5.28.3=h3bd63a1_1
+  - librdkit=2024.09.5=hab0a279_0
   - libsodium=1.0.20=h99b78c6_0
   - libsqlite=3.48.0=h3f77e49_1
   - libtiff=4.7.0=h551f018_3
@@ -132,6 +153,7 @@ dependencies:
   - notebook=7.3.2=pyhd8ed1ab_0
   - notebook-shim=0.2.4=pyhd8ed1ab_1
   - openjpeg=2.5.3=h8a3d83b_0
+  - openldap=2.6.9=hbe55e7a_0
   - openssl=3.4.0=h81ee809_1
   - overrides=7.7.0=pyhd8ed1ab_1
   - packaging=24.2=pyhd8ed1ab_2
@@ -139,10 +161,12 @@ dependencies:
   - pandocfilters=1.5.0=pyhd8ed1ab_0
   - parso=0.8.4=pyhd8ed1ab_1
   - patsy=1.0.1=pyhd8ed1ab_1
+  - pcre2=10.44=h297a79d_2
   - pexpect=4.9.0=pyhd8ed1ab_1
   - pickleshare=0.7.5=pyhd8ed1ab_1004
   - pillow=11.1.0=py312h50aef2c_0
   - pip=25.0=pyh8b19718_0
+  - pixman=0.44.2=h2f9eb0b_0
   - pkgutil-resolve-name=1.3.10=pyhd8ed1ab_2
   - platformdirs=4.3.6=pyhd8ed1ab_1
   - prometheus_client=0.21.1=pyhd8ed1ab_0
@@ -153,6 +177,7 @@ dependencies:
   - pthread-stubs=0.4=hd74edd7_1002
   - ptyprocess=0.7.0=pyhd8ed1ab_1
   - pure_eval=0.2.3=pyhd8ed1ab_1
+  - pycairo=1.27.0=py312h798cee4_0
   - pycparser=2.22=pyh29332c3_1
   - pyg=2.6.1=py312_torch_2.4.0_cpu
   - pygments=2.19.1=pyhd8ed1ab_0
@@ -172,11 +197,14 @@ dependencies:
   - pyyaml=6.0.2=py312h998013c_2
   - pyzmq=26.2.1=py312hf4875e0_0
   - qhull=2020.2=h420ef59_5
+  - rdkit=2024.09.5=py312had33d2d_0
   - readline=8.2=h92ec313_1
   - referencing=0.36.2=pyh29332c3_0
+  - reportlab=4.3.0=py312hea69d52_0
   - requests=2.32.3=pyhd8ed1ab_1
   - rfc3339-validator=0.1.4=pyhd8ed1ab_1
   - rfc3986-validator=0.1.1=pyh9f0ad1d_0
+  - rlpycairo=0.2.0=pyhd8ed1ab_0
   - rpds-py=0.22.3=py312hcd83bfe_0
   - scipy=1.15.1=py312hb7ffdcd_0
   - seaborn=0.13.2=hd8ed1ab_3
@@ -187,6 +215,7 @@ dependencies:
   - sleef=3.8=h8391f65_0
   - sniffio=1.3.1=pyhd8ed1ab_1
   - soupsieve=2.5=pyhd8ed1ab_1
+  - sqlalchemy=2.0.38=py312hea69d52_0
   - stack_data=0.6.3=pyhd8ed1ab_1
   - statsmodels=0.14.4=py312h755e627_0
   - sympy=1.13.3=pyh2585a3b_105
@@ -224,7 +253,7 @@ dependencies:
       - captum==0.2.0
       - cilog==1.3.0
       - cloudpickle==3.1.1
-      - dive-into-graphs==0.0.4
+      - dive-into-graphs==1.1.0
       - et-xmlfile==2.0.0
       - joblib==1.4.2
       - littleutils==0.2.4

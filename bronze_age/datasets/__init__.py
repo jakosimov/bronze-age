@@ -90,18 +90,18 @@ class DatasetEnum(StrEnum):
     
 _DATASETS = {
     DatasetEnum.MUTAG: lambda c: MoleculeDataset(c.data_dir, 'MUTAG'),
+    DatasetEnum.BBBP: lambda c: MoleculeDataset(c.data_dir, 'BBBP', pre_transform=Compose([_flatten_y, _y_to_long])),
     DatasetEnum.PROTEINS: lambda c: TUDataset(root=c.data_dir, name='PROTEINS'),
     DatasetEnum.IMDB_BINARY: lambda c: TUDataset(root=c.data_dir, name='IMDB-BINARY', pre_transform=_add_features),
     DatasetEnum.REDDIT_BINARY: lambda c: TUDataset(root=c.data_dir, name='REDDIT-BINARY', pre_transform=_add_features),
     DatasetEnum.MUTAGENICITY: lambda c: TUDataset(root=c.data_dir, name='Mutagenicity'),
-    DatasetEnum.BBBP: lambda c: MoleculeDataset(c.data_dir, 'BBBP', pre_transform=Compose([_flatten_y, _y_to_long])),
     DatasetEnum.COLLAB: lambda c: TUDataset(root=c.data_dir, name='COLLAB', pre_transform=_add_features),
-    DatasetEnum.BA_2MOTIFS: lambda c: SynGraphDataset(c.data_dir, 'BA_2Motifs', pre_transform=_syn_graph_transform),
     DatasetEnum.INFECTION: lambda c: CustomDataset([Infection(num_layers=c.number_of_layers).create_dataset(num_nodes=1000, edge_probability=0.004) for _ in range(10)]),
+    DatasetEnum.BA_2MOTIFS: lambda c: SynGraphDataset(c.data_dir, 'BA_2Motifs', transform=_syn_graph_transform),    
     DatasetEnum.SATURATION: lambda c: CustomDataset([Saturation(sample_count=1, num_layers=c.number_of_layers, concat_features=False, conv_type=None).create_dataset() for _ in range(10)]),
-    DatasetEnum.BA_SHAPES: lambda c: SynGraphDataset(c.data_dir, 'BA_shapes', pre_transform=Compose([_syn_graph_transform, _x_to_float])),
-    DatasetEnum.TREE_CYCLE: lambda c: SynGraphDataset(c.data_dir, 'Tree_Cycle', pre_transform=Compose([_syn_graph_transform, _x_to_float])),
-    DatasetEnum.TREE_GRID: lambda c: SynGraphDataset(c.data_dir, 'Tree_Grid', pre_transform=Compose([_syn_graph_transform, _x_to_float])),
+    DatasetEnum.BA_SHAPES: lambda c: SynGraphDataset(c.data_dir, 'BA_shapes', transform=Compose([_syn_graph_transform, _x_to_float])),
+    DatasetEnum.TREE_CYCLE: lambda c: SynGraphDataset(c.data_dir, 'Tree_Cycle', transform=Compose([_syn_graph_transform, _x_to_float])),
+    DatasetEnum.TREE_GRID: lambda c: SynGraphDataset(c.data_dir, 'Tree_Grid', transform=Compose([_syn_graph_transform, _x_to_float])),
     DatasetEnum.CORA: lambda c: Planetoid(c.data_dir, name='Cora', pre_transform=_x_to_float),
     DatasetEnum.CITESEER: lambda c: Planetoid(c.data_dir, name='CiteSeer', pre_transform=_x_to_float),
     DatasetEnum.PUBMED: lambda c: Planetoid(c.data_dir, name='PubMed', pre_transform=_x_to_float),
@@ -166,7 +166,7 @@ if __name__ == "__main__":
     from bronze_age.config import Config
     for dataset in DatasetEnum:
         print(dataset)
-        config = Config(dataset=dataset, data_dir='data')
+        config = Config(dataset=dataset, data_dir='data', number_of_layers=1)
         dataset = get_dataset(config)
         print(len(dataset))
         print(dataset[0])
