@@ -15,7 +15,7 @@ class Config:
     data_dir: Path
     temperature : float = 1.0
     alpha : float  = 1.0
-    beta : float  = 0.0
+    beta : float  = 1.0
     dropout : float  = 0.0
     use_batch_norm : float  = True
     network : NetworkType = NetworkType.MLP
