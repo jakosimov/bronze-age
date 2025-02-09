@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from enum import StrEnum
+from pathlib import Path
 
+from bronze_age.datasets import DatasetEnum
 
-class Dataset(StrEnum):
-    MUTAG = 'MUTAG'
 
 @dataclass
 class Config:
-    dataset: Dataset
+    dataset: DatasetEnum
+    data_dir: Path
