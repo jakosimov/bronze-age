@@ -1,10 +1,12 @@
+from dataclasses import dataclass
+from enum import Enum
+
 import torch
 import torch.nn.functional as F
 from torch.nn import ModuleList
-import numpy as np
-from enum import Enum
-from torch_geometric.nn import MessagePassing, global_add_pool
 from torch.nn.functional import log_softmax
+from torch_geometric.nn import MessagePassing, global_add_pool
+
 
 class ActivationType(Enum):
     GUMBEL = "gumbel"
@@ -14,16 +16,20 @@ class NetworkType(Enum):
     LINEAR = "linear"
     MLP = "mlp"
 
+@dataclass
 class ModelConfig:
-    def __init__(self) -> None:
-        self.activation = ActivationType.GUMBEL
-        self.temperature = 1.0
-        self.alpha = 1.0
-        self.beta = 0.0
-        self.dropout = 0.0
-        self.use_batch_norm = True
-        self.network = NetworkType.LINEAR
-        self.hidden_units = 16
+    temperature : float = 1.0
+    alpha : float  = 1.0
+    beta : float  = 0.0
+    dropout : float  = 0.0
+    use_batch_norm : float  = True
+    network : NetworkType = NetworkType.LINEAR
+    hidden_units : int = 16
+    state_size : int = 10
+    num_layers : int = 1
+    skip_connection : bool = False
+    use_pooling : bool = True
+    bounding_parameter : float = 10.0
 
 def to_float_tensor(x):
     if x is not torch.FloatTensor:
@@ -207,16 +213,20 @@ class StoneAgeGNNLayer(MessagePassing):
 
 
 class StoneAgeGNN(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, bounding_parameter, state_size, config: ModelConfig, num_layers=1, use_pooling=True, skip_connection=False):
+    def __init__(self, in_channels, out_channels, config: ModelConfig):
         super().__init__()
 
-        self.use_pooling = use_pooling
-        self.skip_connection = skip_connection
+        self.use_pooling = config.use_pooling
+        self.skip_connection = config.skip_connection
+        state_size = config.state_size
+        num_layers = config.num_layers
+        bounding_parameter = config.bounding_parameter
+        
         # self.num_layers = num_layers
 
         self.input = InputLayer(in_channels, state_size, config)
 
-        if skip_connection:
+        if self.skip_connection:
             self.output = PoolingLayer((num_layers + 1) * state_size, out_channels, config=config)
         else:
             self.output = PoolingLayer(state_size, out_channels, config)
