@@ -166,7 +166,7 @@ if __name__ == "__main__":
     from bronze_age.config import Config
     for dataset in DatasetEnum:
         print(dataset)
-        config = Config(dataset=dataset, data_dir='data', number_of_layers=1)
+        config = Config(dataset=dataset, data_dir='downloads', number_of_layers=1)
         dataset = get_dataset(config)
         print(len(dataset))
         print(dataset[0])
