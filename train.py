@@ -19,7 +19,7 @@ def train(config: Config):
     class LightningModel(lightning.LightningModule):
         def __init__(self):
             super().__init__()
-            self.model = StoneAgeGNN(dataset.num_features, dataset.num_classes, config)
+            self.model = StoneAgeGNN(dataset.num_node_features, dataset.num_classes, config)
 
         def forward(self, x):
             return self.model(x)
@@ -46,6 +46,8 @@ def train(config: Config):
     
     skf = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
     labels = [graph.y[0] for graph in dataset]
+    if not config.use_pooling:
+        labels = [0 for _ in dataset]
     for train_index, test_index in skf.split([0 for _ in labels], labels):
         train_loader = DataLoader([dataset[i] for i in train_index], batch_size=config.batch_size, shuffle=True)
         test_loader = DataLoader([dataset[i] for i in test_index], batch_size=config.batch_size, shuffle=False)
