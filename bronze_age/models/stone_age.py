@@ -1,11 +1,28 @@
 import torch
 import torch.nn.functional as F
+from torch.nn import ModuleList
 import numpy as np
 from enum import Enum
+from torch_geometric.nn import MessagePassing, global_add_pool
 
 class ActivationType(Enum):
     GUMBEL = "gumbel"
     ARGMAX = "argmax"
+
+class NetworkType(Enum):
+    LINEAR = "linear"
+    MLP = "mlp"
+
+class ModelConfig:
+    def __init__(self) -> None:
+        self.activation = ActivationType.GUMBEL
+        self.temperature = 1.0
+        self.alpha = 1.0
+        self.beta = 0.0
+        self.dropout = 0.0
+        self.use_batch_norm = True
+        self.network = NetworkType.LINEAR
+        self.hidden_units = 16
 
 def to_float_tensor(x):
     if x is not torch.FloatTensor:
@@ -87,28 +104,29 @@ class MLP(torch.nn.Module):
 
 
 class LinearSoftmax(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, activation=ActivationType.GUMBEL, temperature=1.0, use_batch_norm=True):
+    def __init__(self, in_channels, out_channels, config: ModelConfig):
         super(LinearSoftmax, self).__init__()
         self.__name__ = 'LinearSoftmax'
         self.lin1 = torch.nn.Linear(in_channels, out_channels)
         self.bn = torch.nn.BatchNorm1d(out_channels)
-        self.argmax = False
-        self.activation = activation
-        self.softmax_temp = temperature
-        self.beta = 0.0
-        self.alpha = 1.0
-        self.use_batch_norm = use_batch_norm
+        self.config = config
+
+    def use_argmax(self):
+        # return self.config.activation == ActivationType.ARGMAX
+        return not self.training
 
     def forward(self, x):
         x = self.lin1(x)
-        if self.use_batch_norm:
+
+        if self.config.use_batch_norm:
             x = self.bn(x)
-        if self.activation == ActivationType.ARGMAX:
+
+        if self.use_argmax():
             x_d = argmax(x)
         else:
-            x_d = gumbel_softmax(x, hard=True, tau=self.softmax_temp, beta=self.beta)
+            x_d = gumbel_softmax(x, hard=True, tau=self.config.temperature, beta=self.config.beta)
 
-        if np.random.random() > self.alpha and self.training:
+        if np.random.random() > self.config.alpha and self.training:
             x = (x + x_d) / 2
         else:
             x = x_d
@@ -116,41 +134,133 @@ class LinearSoftmax(torch.nn.Module):
 
 
 class MLPSoftmax(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, activation=ActivationType.GUMBEL, temperature=1.0, hidden_units=16, dropout=0.0):
+    def __init__(self, in_channels, out_channels, config: ModelConfig):
         super(MLPSoftmax, self).__init__()
         self.__name__ = 'LinearSoftmax'
-        self.mlp = MLP(in_channels, hidden_units, out_channels, 2, dropout)
-        self.activation = activation
-        self.argmax = False
-        self.beta = 0.0
-        self.alpha = 1.0
-        self.softmax_temp = temperature
+        self.config = config
+        self.mlp = MLP(in_channels, config.hidden_units, out_channels, 2, self.config.dropout)
+
+    def use_argmax(self):
+        # return self.config.activation == ActivationType.ARGMAX
+        return not self.training
 
     def forward(self, x):
         x = self.mlp(x)
-        if self.acivation == ActivationType.ARGMAX:
+        if self.use_argmax():
             x_d = argmax(x)
         else:
-            x_d = gumbel_softmax(x, hard=True, tau=self.softmax_temp, beta=self.beta)
+            x_d = gumbel_softmax(x, hard=True, tau=self.config.temperature, beta=self.config.beta)
 
-        if np.random.random() > self.alpha and self.training:
+        if np.random.random() > self.config.alpha and self.training:
             x = (x + x_d) / 2
         else:
             x = x_d
         return x
 
-# class InputLayer(torch.nn.Module):
-#     def __init__(self, in_channels, out_channels, softmax_temp, activation=ActivationType.GUMBEL):
-#         super(InputLayer, self).__init__()
-#         self.lin1 = torch.nn.Linear(in_channels, out_channels)
-#         self.activation = activation
-#         self.softmax_temp = softmax_temp
-#         self.alpha = 1.0
-#         self.beta = 0.0
+class InputLayer(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, config: ModelConfig):
+        super(InputLayer, self).__init__()
+        self.__name__ = 'FirstLayer'
+        self.lin1 = torch.nn.Linear(in_channels, out_channels)
+        self.config = config
 
-#     def forward(self, x):
-#         x = to_float_tensor(x)
-#         x = self.lin1(x)
-#         if self.:
-#             x_d = torch.nn.functional.argmax(x)
+    def use_argmax(self):
+        # return self.config.activation == ActivationType.ARGMAX
+        return not self.training
+
+    def forward(self, x):
+        x = to_float_tensor(x)
+        x = self.lin1(x)
+        if self.use_argmax():
+            x_d = argmax(x)
+        else:
+            x_d = gumbel_softmax(x, hard=True, tau=self.config.temperature, beta=self.config.beta)
+
+        if np.random.random() > self.config.alpha and self.training:
+            x = (x + x_d) / 2
+        else:
+            x = x_d
+        return x
+
+
+class PoolingLayer(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, config: ModelConfig):
+        super(PoolingLayer, self).__init__()
+        self.__name__ = 'PoolingLayer'
+        if config.network == NetworkType.MLP:
+            self.lin2 = MLP(in_channels, config.hidden_units, out_channels, 2, config.dropout)
+        else:
+            self.lin2 = torch.nn.Linear(in_channels, out_channels)
+
+    def forward(self, x):
+        x = self.lin2(x)
+        return log_softmax(x, dim=-1)
+
+
+class StoneAgeGNNLayer(MessagePassing):
+
+    def __init__(self, in_channels, out_channels, bounding_parameter, config: ModelConfig, index=0):
+        super().__init__(aggr='add')
+        self.__name__ = 'stone-age-' + str(index)
+        if config.network == NetworkType.MLP:
+            self.linear_softmax = MLPSoftmax(in_channels, out_channels, config)
+        else:
+            self.linear_softmax = LinearSoftmax(in_channels, out_channels, config)
+        self.bounding_parameter = bounding_parameter
+
+    def forward(self, x, edge_index):
+        return self.propagate(edge_index, x=x)
+
+    def message(self, x_j):
+        return x_j
+
+    def aggregate(self, inputs, index, ptr, dim_size):
+        message_sums = super().aggregate(inputs, index, ptr=ptr, dim_size=dim_size)
+        return torch.clamp(message_sums, min=0, max=self.bounding_parameter)
+
+    def update(self, inputs, x):
+        combined = torch.cat((inputs, x), 1)
+        x = self.linear_softmax(combined)
+        return x
+
+
+class StoneAgeGNN(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, bounding_parameter, state_size, config: ModelConfig, num_layers=1, use_pooling=True, skip_connection=False):
+        super().__init__()
+
+        self.use_pooling = use_pooling
+        self.skip_connection = skip_connection
+
+        self.input = InputLayer(in_channels, state_size, config)
+        # self.num_layers = num_layers
+
+        if skip_connection:
+            self.output = PoolingLayer((num_layers + 1) * state_size, out_channels, config=config)
+        else:
+            self.output = PoolingLayer(state_size, out_channels, config)
+
+        self.stone_age = ModuleList()
+        for i in range(num_layers):
+            self.stone_age.append(
+                StoneAgeGNNLayer(state_size * 2,
+                                 state_size,
+                                 bounding_parameter=bounding_parameter,
+                                 config=config,
+                                 index=i))
+
+    def forward(self, x, edge_index, batch=None):
+
+        x = self.input(x)
+        xs = [x]
+        for layer in self.stone_age:
+            x = layer(x, edge_index)
+            xs.append(x)
+
+        if self.use_pooling:
+            x = global_add_pool(x, batch)
+            xs = [global_add_pool(xi, batch) for xi in xs]
+        if self.skip_connection:
+            x = torch.cat(xs, dim=1)
+        x = self.output(x)
+        return x
 
