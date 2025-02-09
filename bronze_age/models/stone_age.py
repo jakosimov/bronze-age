@@ -134,7 +134,7 @@ class SoftmaxLayer(torch.nn.Module):
         else:
             x_d = gumbel_softmax(x, hard=True, tau=self.config.temperature, beta=self.config.beta)
 
-        if np.random.random() > self.config.alpha and self.training:
+        if torch.rand(1).item() > self.config.alpha and self.training:
             x = (x + x_d) / 2
         else:
             x = x_d
