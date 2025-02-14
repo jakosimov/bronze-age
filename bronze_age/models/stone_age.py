@@ -89,7 +89,7 @@ class MLP(torch.nn.Module):
 class SoftmaxLayer(torch.nn.Module):
     """For usage in StoneAgeGNNLayer"""
 
-    def __init__(self, out_channels, config: Config, linear_layer, use_batch_norm=None):
+    def __init__(self, out_channels, config: Config, linear_layer, use_batch_norm=None, mode="linear"):
         super(SoftmaxLayer, self).__init__()
         self.__name__ = 'LinearSoftmax'
         self.lin1 = linear_layer
@@ -193,7 +193,7 @@ class StoneAgeGNN(torch.nn.Module):
     def __init__(self, in_channels, out_channels, config: Config):
         super().__init__()
 
-        self.use_pooling = config.use_pooling
+        self.use_pooling = config.dataset.uses_pooling
         self.skip_connection = config.skip_connection
         state_size = config.state_size
         num_layers = config.num_layers
@@ -219,7 +219,7 @@ class StoneAgeGNN(torch.nn.Module):
 
     def forward(self, x, edge_index, batch=None):
 
-        x = self.input(x)
+        x = self.input(x.float())
         xs = [x]
         for layer in self.stone_age:
             x = layer(x, edge_index)

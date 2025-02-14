@@ -23,6 +23,8 @@ class Config:
     state_size : int = 10
     num_layers : int = 5
     skip_connection : bool = True
-    use_pooling : bool = True
     bounding_parameter : int = 1000
     batch_size : int = 128
+    learning_rate : float = 0.01
+    max_epochs : int = 1500
+    num_cv : int = 10
