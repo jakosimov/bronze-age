@@ -26,3 +26,5 @@ class Config:
     use_pooling : bool = True
     bounding_parameter : int = 1000
     batch_size : int = 128
+    device: str = "mps"
+    max_leaf_nodes: int = 100
