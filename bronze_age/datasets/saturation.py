@@ -13,7 +13,6 @@ from tqdm import tqdm as tq
 from scipy.stats import ks_2samp
 
 
-
 class Saturation:
     NUM_GRAPHS = 10
     TEST_RATIO = 0.4
@@ -71,7 +70,14 @@ class Saturation:
     def is_trained_model_valid(self, test_acc):
         return test_acc > 0.999
 
-    def evaluate_explanation(self, explain_function, model, test_dataset, explain_name, explain_reload_function=None):
+    def evaluate_explanation(
+        self,
+        explain_function,
+        model,
+        test_dataset,
+        explain_name,
+        explain_reload_function=None,
+    ):
         accs = []
         all_attributions = []
         for data in test_dataset:
@@ -95,15 +101,21 @@ class Saturation:
                         red_ids.append(eid)
                     else:
                         white_ids.append(eid)
-                edge_mask = explain_function(model, node_idx, data.x, data.edge_index, data.y[node_idx].item())
+                edge_mask = explain_function(
+                    model, node_idx, data.x, data.edge_index, data.y[node_idx].item()
+                )
                 red_values = edge_mask[red_ids]
                 blue_values = edge_mask[blue_ids]
                 white_values = edge_mask[white_ids]
                 minority = min(red_values, blue_values, key=len)
                 pvalue = ks_2samp(white_values, minority).pvalue
                 accs.append(1 if pvalue < 0.01 else 0)
-                all_attributions.append({'red': red_values.tolist(),
-                                         'blue': blue_values.tolist(),
-                                         'white': white_values.tolist()})
+                all_attributions.append(
+                    {
+                        "red": red_values.tolist(),
+                        "blue": blue_values.tolist(),
+                        "white": white_values.tolist(),
+                    }
+                )
                 pbar.set_postfix(acc=np.mean(accs))
         return accs
