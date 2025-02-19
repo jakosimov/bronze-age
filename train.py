@@ -327,7 +327,7 @@ def get_config_for_dataset(dataset, **kwargs):
     return Config(**config)
 
 
-def store_results(results):
+def store_results(results, filename="results.csv", filename2="results2.csv"):
     df = pd.DataFrame(results).T
     df.columns = ["success", "mean_acc", "std_acc", "mean_acc_dt", "std_acc_dt"]
 
@@ -344,8 +344,8 @@ def store_results(results):
         + " ± "
         + df["std_acc_dt"].map("{:.2f}".format, na_action="ignore")
     )
-    df.to_csv("results.csv")
-    df2.to_csv("results2.csv")
+    df.to_csv(filename)
+    df2.to_csv(filename2)
 
     print(df2)
 
@@ -376,6 +376,7 @@ if __name__ == "__main__":
             mean_acc_dt,
             std_acc_dt,
         ) in results.items():
+            store_results(results, filename="results_temp.csv", filename2="results2_temp.csv")
             if success:
                 print(
                     f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}"

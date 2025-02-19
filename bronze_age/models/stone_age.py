@@ -286,7 +286,7 @@ class StoneAgeGNN(torch.nn.Module):
             )
 
     def forward(self, x, edge_index, batch=None):
-        x = self.input(x)
+        x = self.input(x.float())
         xs = [x]
         for layer in self.stone_age:
             x = layer(x, edge_index)
