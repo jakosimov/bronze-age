@@ -143,6 +143,7 @@ def train(config: Config):
         labels = [0 for _ in dataset]
 
     test_accuracies = []
+    test_accuracies_dt = []
     for i, (train_index, test_index) in enumerate(skf.split([0 for _ in labels], labels)):
         sss = ShuffleSplit(n_splits=1, test_size=0.1, random_state=41)
 
@@ -195,12 +196,13 @@ def train(config: Config):
         test_accuracy = trainer.test(best_validation_model, test_loader, verbose=False)[0]['test_acc']
 
         tree_model = train_decision_tree_model(
-            model.model, config, dataset.num_classes, train_dataset, test_dataset
+            model.model, config, dataset.num_classes, train_dataset, val_dataset
         )
         wrapped_tree_model = LightningTestWrapper(tree_model)
         test_accuracy_dt = trainer.test(wrapped_tree_model, test_loader, verbose=False)[
             0
         ]["test_acc_dt"]
+        test_accuracies_dt.append(test_accuracy_dt)
 
         print(f"=====================")
         print(f"Fold {i+1}/{config.num_cv}")
@@ -214,6 +216,7 @@ def train(config: Config):
     print(f"=====================")
     print(f"Dataset {config.dataset}")
     print(f"Average test accuracy: {np.mean(test_accuracies)} with std: {np.std(test_accuracies)}")
+    print(f"Average test accuracy DT: {np.mean(test_accuracies_dt)} with std: {np.std(test_accuracies_dt)}")
     print(f"=====================")
     return np.mean(test_accuracies), np.std(test_accuracies)
 
@@ -274,7 +277,7 @@ def get_config_for_dataset(dataset, **kwargs):
 if __name__ == '__main__':
     results = {}
     #datasets = [DatasetEnum.INFECTION, DatasetEnum.SATURATION, DatasetEnum.BA_SHAPES, DatasetEnum.TREE_CYCLE, DatasetEnum.TREE_GRID, DatasetEnum.BA_2MOTIFS, DatasetEnum.MUTAG, DatasetEnum.MUTAGENICITY, DatasetEnum.BBBP, DatasetEnum.PROTEINS, DatasetEnum.IMDB_BINARY, DatasetEnum.REDDIT_BINARY, DatasetEnum.COLLAB]
-    datasets = [DatasetEnum.SATURATION]
+    datasets = [DatasetEnum.MUTAG]
     for dataset in datasets:
         for dataset_, (success, mean_acc, std_acc) in results.items():
             if success:
@@ -283,7 +286,7 @@ if __name__ == '__main__':
                 print(f"🛑 {dataset_}")
         print("Running dataset:", dataset)
         try:
-            config = get_config_for_dataset(dataset, learning_rate=0.02)
+            config = get_config_for_dataset(dataset, learning_rate=0.01)
             lightning.seed_everything(0)
             mean_acc, std_acc = train(config)
             results[dataset] = (True, mean_acc, std_acc)

@@ -264,7 +264,7 @@ class StoneAgeGNN(torch.nn.Module):
         self.stone_age = ModuleList()
         for i in range(num_layers):
             self.stone_age.append(
-                BronzeAgeGNNLayer(state_size,
+                StoneAgeGNNLayer(state_size,
                                  state_size,
                                  bounding_parameter=bounding_parameter,
                                  config=config,
