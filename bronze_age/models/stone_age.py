@@ -191,7 +191,7 @@ class StoneAgeGNNLayer(MessagePassing):
         self.bounding_parameter = bounding_parameter
 
         if config.network == NetworkType.MLP:
-            self.linear_softmax = MLPSoftmax(in_channels, out_channels, config)
+            self.linear_softmax = MLPSoftmax(2*in_channels, out_channels, config)
         else:
             self.linear_softmax = LinearSoftmax(in_channels, out_channels, config)
 
@@ -210,6 +210,35 @@ class StoneAgeGNNLayer(MessagePassing):
         x = self.linear_softmax(combined)
         return x
 
+class BronzeAgeGNNLayer(MessagePassing):
+    def __init__(self, in_channels, out_channels, bounding_parameter, config: Config, index=0, a=5):
+        super().__init__(aggr='add')
+        self.__name__ = 'stone-age-' + str(index)
+        self.bounding_parameter = bounding_parameter
+        self.register_buffer('_Y_range', torch.arange(bounding_parameter).float())
+        self.a = a
+        if config.network == NetworkType.MLP:
+            self.linear_softmax = MLPSoftmax(in_channels + bounding_parameter*in_channels, out_channels, config)
+        else:
+            self.linear_softmax = LinearSoftmax(in_channels + bounding_parameter*in_channels, out_channels, config)
+    
+    def forward(self, x, edge_index):
+        return self.propagate(edge_index, x=x)
+
+    def message(self, x_j):
+        return x_j
+    
+    def aggregate(self, inputs, index, ptr, dim_size):
+        message_sums = super().aggregate(inputs, index, ptr=ptr, dim_size=dim_size)
+        clamped_sum =  torch.clamp(message_sums, min=0, max=self.bounding_parameter)
+        states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
+        states = F.sigmoid(self.a * states)
+        return states.view(*states.shape[:-2], -1)
+
+    def update(self, inputs, x):
+        combined = torch.cat((inputs, x), 1)
+        x = self.linear_softmax(combined)
+        return x
 
 class StoneAgeGNN(torch.nn.Module):
     def __init__(self, in_channels, out_channels, config: Config):
@@ -235,14 +264,11 @@ class StoneAgeGNN(torch.nn.Module):
         self.stone_age = ModuleList()
         for i in range(num_layers):
             self.stone_age.append(
-                StoneAgeGNNLayer(
-                    state_size * 2,
-                    state_size,
-                    bounding_parameter=bounding_parameter,
-                    config=config,
-                    index=i,
-                )
-            )
+                BronzeAgeGNNLayer(state_size,
+                                 state_size,
+                                 bounding_parameter=bounding_parameter,
+                                 config=config,
+                                 index=i))
 
     def forward(self, x, edge_index, batch=None):
 
