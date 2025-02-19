@@ -15,6 +15,7 @@ from torchmetrics.classification import Accuracy
 
 from bronze_age.config import Config, NetworkType
 from bronze_age.datasets import DatasetEnum, get_dataset
+from bronze_age.models.decision_tree import train_decision_tree_model
 from bronze_age.models.stone_age import StoneAgeGNN as BronzeAgeGNN
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
@@ -41,8 +42,8 @@ def get_class_weights(y, num_classes, device=None):
 
 def train(config: Config):
     dataset = get_dataset(config)
-    
-    
+
+
     class LightningModel(lightning.LightningModule):
         def __init__(self, class_weights=None):
             super().__init__()
@@ -82,7 +83,7 @@ def train(config: Config):
             self.val_accuracy(y_hat, y)
             self.log('val_acc', self.val_accuracy, on_step=False, on_epoch=True)
             return loss
-        
+
         def test_step(self, batch, batch_idx):
             y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
             # NLL loss
@@ -96,7 +97,7 @@ def train(config: Config):
             self.val_accuracy(y_hat, y)
             self.log('test_acc', self.val_accuracy, on_step=False, on_epoch=True)
             return loss
-        
+
         def configure_optimizers(self):
             return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
 
@@ -140,18 +141,18 @@ def train(config: Config):
         # no pooling and no masking ->
         # take random graphs from dataset
         labels = [0 for _ in dataset]
-    
+
     test_accuracies = []
     for i, (train_index, test_index) in enumerate(skf.split([0 for _ in labels], labels)):
         sss = ShuffleSplit(n_splits=1, test_size=0.1, random_state=41)
-        
+
         if not config.dataset.uses_mask:
             #print(len(train_val_dataset))
             train_val_dataset = dataset[train_index]
             X = [data.x for data in train_val_dataset]
             y = [data.y for data in train_val_dataset]
             train_index, val_index = next(sss.split(X, y))
-        
+
             train_dataset = train_val_dataset[train_index]
             val_dataset = train_val_dataset[val_index]
             test_dataset = dataset[test_index]
@@ -174,7 +175,7 @@ def train(config: Config):
                 test_dataset = [data]
             else:
                 raise NotImplementedError("Masking not implemented for multiple graphs")
-            
+
         train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
         val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
         test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0)
@@ -184,22 +185,31 @@ def train(config: Config):
 
         class_weights = get_class_weights(y, dataset.num_classes, device=None)
         model = LightningModel(class_weights=class_weights)
-        
+
         trainer = lightning.Trainer(max_epochs=config.max_epochs, log_every_n_steps=1, accelerator='cpu', callbacks=[early_stopping, checkpoint_callback], enable_model_summary=False, enable_progress_bar=False)
         trainer.fit(model, train_loader, val_dataloaders=val_loader)
-        
+
         best_validation_model = LightningModel.load_from_checkpoint(checkpoint_callback.best_model_path)
         best_train_accuracy = trainer.test(best_validation_model, train_loader, verbose=False)[0]['test_acc']
         best_validation_accuracy = trainer.test(best_validation_model, val_loader, verbose=False)[0]['test_acc']
         test_accuracy = trainer.test(best_validation_model, test_loader, verbose=False)[0]['test_acc']
-        
+
+        tree_model = train_decision_tree_model(
+            model.model, config, dataset.num_classes, train_dataset, test_dataset
+        )
+        wrapped_tree_model = LightningTestWrapper(tree_model)
+        test_accuracy_dt = trainer.test(wrapped_tree_model, test_loader, verbose=False)[
+            0
+        ]["test_acc_dt"]
+
         print(f"=====================")
         print(f"Fold {i+1}/{config.num_cv}")
         print(f"Train accuracy: {best_train_accuracy}")
         print(f"Validation accuracy: {best_validation_accuracy}")
         print(f"Test accuracy: {test_accuracy}")
+        print(f"Test accuracy DT: {test_accuracy_dt}")
         print(f"=====================")
-        
+
         test_accuracies.append(test_accuracy)
     print(f"=====================")
     print(f"Dataset {config.dataset}")
@@ -252,7 +262,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "bounding_parameter": 1000,
         "batch_size": 128,
         "learning_rate": 0.01,
-        "max_epochs": 1500, 
+        "max_epochs": 1500,
         "num_cv": 10,
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
@@ -260,7 +270,7 @@ def get_config_for_dataset(dataset, **kwargs):
     }
     config.update(kwargs)
     return Config(**config)
-    
+
 if __name__ == '__main__':
     results = {}
     #datasets = [DatasetEnum.INFECTION, DatasetEnum.SATURATION, DatasetEnum.BA_SHAPES, DatasetEnum.TREE_CYCLE, DatasetEnum.TREE_GRID, DatasetEnum.BA_2MOTIFS, DatasetEnum.MUTAG, DatasetEnum.MUTAGENICITY, DatasetEnum.BBBP, DatasetEnum.PROTEINS, DatasetEnum.IMDB_BINARY, DatasetEnum.REDDIT_BINARY, DatasetEnum.COLLAB]
@@ -281,8 +291,8 @@ if __name__ == '__main__':
             print(f"Error with dataset {dataset}: {e}")
             results[dataset] = (False, None, None)
             raise e
-            
-    
+
+
     for dataset, (success, mean_acc, std_acc) in results.items():
         if success:
             print(f"✅ {dataset}: {mean_acc} ± {std_acc}")
