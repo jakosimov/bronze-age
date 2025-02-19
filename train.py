@@ -129,7 +129,6 @@ def train(config: Config):
             return loss
 
     skf = StratifiedKFold(n_splits=config.num_cv, shuffle=True, random_state=42)
-    labels = [graph.y[0] for graph in dataset]
     if config.dataset.uses_pooling:
         labels = [graph.y[0] for graph in dataset]
     elif config.dataset.uses_mask:
@@ -137,12 +136,11 @@ def train(config: Config):
             labels = dataset[0].y
         else:
             raise NotImplementedError("Masking not implemented for multiple graphs")
-        #labels = np.array([graph.y for graph in dataset]).flatten()
-        
-        #if dataset == DatasetEnum.OGBA:
-        #    labels = labels.flatten()
     else:
+        # no pooling and no masking ->
+        # take random graphs from dataset
         labels = [0 for _ in dataset]
+    
     test_accuracies = []
     for i, (train_index, test_index) in enumerate(skf.split([0 for _ in labels], labels)):
         sss = ShuffleSplit(n_splits=1, test_size=0.1, random_state=41)
@@ -183,48 +181,34 @@ def train(config: Config):
 
         early_stopping = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=100, verbose=False, mode="min")
         checkpoint_callback = ModelCheckpoint(save_top_k=1, monitor="val_loss", mode="min")
+
         class_weights = get_class_weights(y, dataset.num_classes, device=None)
         model = LightningModel(class_weights=class_weights)
+        
         trainer = lightning.Trainer(max_epochs=config.max_epochs, log_every_n_steps=1, accelerator='cpu', callbacks=[early_stopping, checkpoint_callback], enable_model_summary=False, enable_progress_bar=False)
-        #print("Len train_loader:", len(train_loader))
-        #print("num trainable params:", sum(p.numel() for p in model.parameters() if p.requires_grad))
         trainer.fit(model, train_loader, val_dataloaders=val_loader)
+        
         best_validation_model = LightningModel.load_from_checkpoint(checkpoint_callback.best_model_path)
+        best_train_accuracy = trainer.test(best_validation_model, train_loader, verbose=False)[0]['test_acc']
         best_validation_accuracy = trainer.test(best_validation_model, val_loader, verbose=False)[0]['test_acc']
         test_accuracy = trainer.test(best_validation_model, test_loader, verbose=False)[0]['test_acc']
+        
         print(f"=====================")
         print(f"Fold {i+1}/{config.num_cv}")
-
+        print(f"Train accuracy: {best_train_accuracy}")
         print(f"Validation accuracy: {best_validation_accuracy}")
         print(f"Test accuracy: {test_accuracy}")
         print(f"=====================")
+        
         test_accuracies.append(test_accuracy)
     print(f"=====================")
     print(f"Dataset {config.dataset}")
-    #print("Test accuracies:", test_accuracies)
     print(f"Average test accuracy: {np.mean(test_accuracies)} with std: {np.std(test_accuracies)}")
     print(f"=====================")
     return np.mean(test_accuracies), np.std(test_accuracies)
 
-if __name__ == '__main__':
-    lightning.seed_everything(0)
 
-    config = {
-        "data_dir": "downloads",
-        "temperature": 1.0,
-        "alpha": 1.0,
-        "beta": 1.0,
-        "dropout": 0.0,
-        "use_batch_norm": True,
-        "network": NetworkType.MLP,
-        "hidden_units": 16,
-        "skip_connection": True,
-        "bounding_parameter": 1000,
-        "batch_size": 128,
-        "learning_rate": 0.01,
-        "max_epochs": 1500, 
-        "num_cv": 10,
-    }
+def get_config_for_dataset(dataset, **kwargs):
     NUM_LAYERS = {
         DatasetEnum.INFECTION: 5,
         DatasetEnum.SATURATION: 1,
@@ -255,8 +239,32 @@ if __name__ == '__main__':
         DatasetEnum.REDDIT_BINARY: 5,
         DatasetEnum.COLLAB: 8,
     }
+    config = {
+        "data_dir": "downloads",
+        "temperature": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "network": NetworkType.MLP,
+        "hidden_units": 16,
+        "skip_connection": True,
+        "bounding_parameter": 1000,
+        "batch_size": 128,
+        "learning_rate": 0.01,
+        "max_epochs": 1500, 
+        "num_cv": 10,
+        "dataset": dataset,
+        "num_layers": NUM_LAYERS[dataset],
+        "state_size": NUM_STATES[dataset],
+    }
+    config.update(kwargs)
+    return Config(**config)
+    
+if __name__ == '__main__':
     results = {}
-    datasets = [DatasetEnum.INFECTION, DatasetEnum.SATURATION, DatasetEnum.BA_SHAPES, DatasetEnum.TREE_CYCLE, DatasetEnum.TREE_GRID, DatasetEnum.BA_2MOTIFS, DatasetEnum.MUTAG, DatasetEnum.MUTAGENICITY, DatasetEnum.BBBP, DatasetEnum.PROTEINS, DatasetEnum.IMDB_BINARY, DatasetEnum.REDDIT_BINARY, DatasetEnum.COLLAB]
+    #datasets = [DatasetEnum.INFECTION, DatasetEnum.SATURATION, DatasetEnum.BA_SHAPES, DatasetEnum.TREE_CYCLE, DatasetEnum.TREE_GRID, DatasetEnum.BA_2MOTIFS, DatasetEnum.MUTAG, DatasetEnum.MUTAGENICITY, DatasetEnum.BBBP, DatasetEnum.PROTEINS, DatasetEnum.IMDB_BINARY, DatasetEnum.REDDIT_BINARY, DatasetEnum.COLLAB]
+    datasets = [DatasetEnum.SATURATION]
     for dataset in datasets:
         for dataset_, (success, mean_acc, std_acc) in results.items():
             if success:
@@ -265,15 +273,9 @@ if __name__ == '__main__':
                 print(f"🛑 {dataset_}")
         print("Running dataset:", dataset)
         try:
-            #use_mask = dataset.uses_mask
-            #if use_mask:
-            #    raise NotImplementedError("Masking not implemented")
-            num_layers = NUM_LAYERS[dataset]
-            num_states = NUM_STATES[dataset]
-            config["dataset"] = dataset
-            config["num_layers"] = num_layers
-            config["state_size"] = num_states
-            mean_acc, std_acc = train(Config(**config))
+            config = get_config_for_dataset(dataset, learning_rate=0.02)
+            lightning.seed_everything(0)
+            mean_acc, std_acc = train(config)
             results[dataset] = (True, mean_acc, std_acc)
         except Exception as e:
             print(f"Error with dataset {dataset}: {e}")
