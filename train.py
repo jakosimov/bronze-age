@@ -16,7 +16,6 @@ from torchmetrics.classification import Accuracy
 from bronze_age.config import Config, NetworkType
 from bronze_age.datasets import DatasetEnum, get_dataset
 from bronze_age.models.stone_age import StoneAgeGNN as BronzeAgeGNN
-from stone_age.models.stone_age_gnn import StoneAgeGNN
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 warnings.filterwarnings("ignore", ".*GPU available but not used.*")
@@ -100,8 +99,35 @@ def train(config: Config):
         
         def configure_optimizers(self):
             return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
-        
-    
+
+    class LightningTestWrapper(lightning.LightningModule):
+        def __init__(self, model, class_weights=None):
+            super().__init__()
+            self.model = model
+            self.test_accuracy = Accuracy(
+                task="multiclass", num_classes=dataset.num_classes, average="micro"
+            )
+            self.class_weights = class_weights
+
+        def forward(self, x):
+            return self.model(x)
+
+        def test_step(self, batch, batch_idx):
+            y_hat = self.model(
+                x=batch.x, edge_index=batch.edge_index, batch=batch.batch
+            )
+            # NLL loss
+            y = batch.y
+            if config.dataset.uses_mask:
+                y_hat = y_hat[batch.test_mask]
+                y = y[batch.test_mask]
+            loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+            self.log("test_loss_dt", loss, batch_size=batch.y.size(0), on_epoch=True)
+
+            self.test_accuracy(y_hat, y)
+            self.log("test_acc_dt", self.test_accuracy, on_step=False, on_epoch=True)
+            return loss
+
     skf = StratifiedKFold(n_splits=config.num_cv, shuffle=True, random_state=42)
     labels = [graph.y[0] for graph in dataset]
     if config.dataset.uses_pooling:

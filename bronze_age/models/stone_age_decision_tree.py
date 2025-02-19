@@ -7,6 +7,8 @@ from torch_geometric.nn import MessagePassing, global_add_pool
 
 
 def linear_combo_features(input_data, state_size):
+    """Calculates the pairwise differences between the features and appends them to the input data"""
+
     difference_features = (
         input_data[np.newaxis, :, :state_size, None]
         > input_data[:, np.newaxis, :state_size]
@@ -15,33 +17,29 @@ def linear_combo_features(input_data, state_size):
     return np.concatenate((input_data, difference_features), axis=1)
 
 
-def get_decision_path_features(
-    estimator, data, num_classes=0, message=False, num_features=0, pooling_gc=False
-):
-    feature = estimator.tree_.feature
-    node_indicator = estimator.decision_path(data)
-    leave_id = estimator.apply(data)
-    threshold = estimator.tree_.threshold
-    features_used = np.zeros((np.shape(data)[0], np.shape(data)[1]))
-    # features_used = np.ones((np.shape(data)[0], np.shape(data)[1]))
-    for sample_id in range(len(data)):
-        node_index = node_indicator.indices[
-            node_indicator.indptr[sample_id] : node_indicator.indptr[sample_id + 1]
-        ]
+# def get_decision_path_features(estimator, data):
+#     feature = estimator.tree_.feature
+#     node_indicator = estimator.decision_path(data)
+#     leave_id = estimator.apply(data)
+#     threshold = estimator.tree_.threshold
+#     features_used = np.zeros((np.shape(data)[0], np.shape(data)[1]))
+#     # features_used = np.ones((np.shape(data)[0], np.shape(data)[1]))
+#     for sample_id in range(len(data)):
+#         node_index = node_indicator.indices[
+#             node_indicator.indptr[sample_id] : node_indicator.indptr[sample_id + 1]
+#         ]
 
-        for node_id in node_index:
-            # If Current Node is a Leaf -> Skip
-            if leave_id[sample_id] == node_id:
-                continue
+#         for node_id in node_index:
+#             # If Current Node is a Leaf -> Skip
+#             if leave_id[sample_id] == node_id:
+#                 continue
 
-            features_used[sample_id][feature[node_id]] = 1.0
+#             features_used[sample_id][feature[node_id]] = 1.0
 
-    return features_used
+#     return features_used
 
 
-def get_features_used(
-    estimator, data, num_classes=0, message=False, num_features=0, pooling_gc=False
-):
+def get_features_used(estimator, data, num_classes=0):
     features_used = np.zeros((np.shape(data)[0], num_classes, np.shape(data)[1]))
     predictions = estimator.predict(data)
     explainer = shap.TreeExplainer(
@@ -52,9 +50,7 @@ def get_features_used(
     if shap_values.ndim != 3:
         shap_values = shap_values[..., None]
 
-    decision_path_features = get_decision_path_features(
-        estimator, data, num_classes, message, num_features, pooling_gc
-    )
+    # decision_path_features = get_decision_path_features(estimator, data)
     for sample_id in range(len(data)):
         for class_index in range(shap_values.shape[-1]):
             current_class = estimator.classes_[class_index]
@@ -112,7 +108,6 @@ class DTModule(torch.nn.Module):
 
 
 class StoneAgeGNNLayerDT(MessagePassing):
-
     def __init__(
         self,
         tree,
@@ -132,7 +127,7 @@ class StoneAgeGNNLayerDT(MessagePassing):
         self.state_size = config.state_size
         self.messages = None
         self.edge_index = None
-        self.importance = None
+        # self.importance = None
         self.inputs = None
         self.tree_input = None
         self.features_used = None
@@ -163,13 +158,10 @@ class StoneAgeGNNLayerDT(MessagePassing):
             self.tree_input = linear_combo_features(self.tree_input, num_features)
 
         if explain:
-            feature_importance = self.tree.tree.feature_importances_
             features_used = get_features_used(
                 self.tree.tree,
                 self.tree_input,
                 num_classes=self.state_size,
-                message=True,
-                num_features=len(feature_importance),
             )
             self.features_used = features_used
 
@@ -191,11 +183,13 @@ class StoneAgeDecisionTree(torch.nn.Module):
             trees["output"],
             "output",
             state_size=out_channels,
-            use_pooling=config.use_pooling,
-            linear_feature_combinations=config.use_pooling,
+            use_pooling=config.dataset.uses_pooling,
+            linear_feature_combinations=config.dataset.uses_pooling,
         )
         self.tree_depths = [self.input.tree.get_depth()]
         self.stone_age = torch.nn.ModuleList()
+        self.use_pooling = config.dataset.uses_pooling
+        self.skip_connection = config.skip_connection
 
         for i in range(config.num_layers):
             self.tree_depths.append(trees[f"stone_age.{i}.linear_softmax"].get_depth())
@@ -221,8 +215,6 @@ class StoneAgeDecisionTree(torch.nn.Module):
                 batch = torch.from_numpy(np.array([0 for _ in range(len(x))]))
             x = global_add_pool(x, batch)
             xs = [global_add_pool(xi, batch) for xi in xs]
-            # x = global_max_pool(x, batch)
-            # xs = [global_max_pool(xi, batch) for xi in xs]
         if self.skip_connection:
             x = torch.cat(xs, dim=1)
 

@@ -55,6 +55,10 @@ class FeatureExtractor(nn.Module):
         self.saver = SaveInputOutput(mask, vq=vq)
         self.handlers = []
         some_dict = dict([*self.model.named_modules()])
+        # print()
+        # print("Keys")
+        # print(some_dict.keys())
+        # print()
         for layer_id in layer_names:
             layer = some_dict[layer_id]
             layer.__name__ = layer_id
