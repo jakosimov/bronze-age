@@ -332,7 +332,7 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
     df.columns = ["success", "mean_acc", "std_acc", "mean_acc_dt", "std_acc_dt"]
 
     df.success = df.success.replace({True: "✅", False: "🛑"})
-    df2 = df[["success"]]
+    df2 = df[["success"]].copy()
 
     df2["GNN"] = (
         df["mean_acc"].map("{:.2f}".format, na_action="ignore")
