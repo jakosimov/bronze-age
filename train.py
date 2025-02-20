@@ -218,7 +218,7 @@ def train(config: Config):
         best_validation_model = LightningModel.load_from_checkpoint(
             checkpoint_callback.best_model_path
         )
-        
+
         best_train_accuracy = trainer.test(
             best_validation_model, train_loader_test, verbose=False
         )[0]["test_acc"]
@@ -371,7 +371,7 @@ if __name__ == "__main__":
             std_acc_dt,
         ) in results.items():
             store_results(
-                results, filename="results_temp_3.csv", filename2="results2_temp_3.csv"
+                results, filename="results_temp.csv", filename2="results2_temp.csv"
             )
             if success:
                 print(
@@ -404,4 +404,4 @@ if __name__ == "__main__":
         else:
             print(f"🛑 {dataset_}")
 
-    store_results(results, filename="results_3.csv", filename2="results2_3.csv")
+    store_results(results, filename="results.csv", filename2="results2.csv")
