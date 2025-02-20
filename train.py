@@ -15,6 +15,7 @@ from torchmetrics.classification import Accuracy
 
 from bronze_age.config import Config, NetworkType
 from bronze_age.datasets import DatasetEnum, get_dataset
+from bronze_age.datasets.cross_validation import CrossValidationSplit
 from bronze_age.models.decision_tree import train_decision_tree_model
 from bronze_age.models.stone_age import StoneAgeGNN as BronzeAgeGNN
 
@@ -22,10 +23,28 @@ warnings.filterwarnings("ignore", ".*does not have many workers.*")
 warnings.filterwarnings("ignore", ".*GPU available but not used.*")
 
 
+from itertools import chain
+
 logging.getLogger("lightning.pytorch.utilities.rank_zero").setLevel(logging.WARNING)
 
 
-def get_class_weights(y, num_classes, device=None):
+def get_class_weights(
+    train_dataset, validation_dataset, config, num_classes, device=None
+):
+    if config.dataset.uses_mask:
+        y_train = train_dataset[0].y[train_dataset[0].train_mask].cpu().detach().numpy()
+        y_val = (
+            validation_dataset[0]
+            .y[validation_dataset[0].val_mask]
+            .cpu()
+            .detach()
+            .numpy()
+        )
+        y = np.concatenate([y_train, y_val])
+    else:
+        y = np.concatenate(
+            [graph.y for graph in chain(train_dataset, validation_dataset)]
+        )
     classes = np.unique(y)
     class_weights = np.ones(num_classes)
     computed_class_weights = compute_class_weight(
@@ -42,159 +61,124 @@ def get_class_weights(y, num_classes, device=None):
     return class_weights
 
 
+class LightningModel(lightning.LightningModule):
+    def __init__(
+        self,
+        num_node_features: int,
+        num_classes: int,
+        config: Config,
+        class_weights=None,
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+        self.config = config
+        self.model = BronzeAgeGNN(num_node_features, num_classes, config)
+        self.class_weights = class_weights
+        self.train_accuracy = Accuracy(
+            task="multiclass", num_classes=num_classes, average="micro"
+        )
+        self.val_accuracy = Accuracy(
+            task="multiclass", num_classes=num_classes, average="micro"
+        )
+        self.test_accuracy = Accuracy(
+            task="multiclass", num_classes=num_classes, average="micro"
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
+
+        y = batch.y
+        if self.config.dataset.uses_mask:
+            y_hat = y_hat[batch.train_mask]
+            y = y[batch.train_mask]
+        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        self.log("train_loss", loss, batch_size=batch.y.size(0))
+
+        self.train_accuracy(y_hat, y)
+        self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
+        # NLL loss
+        y = batch.y
+        if self.config.dataset.uses_mask:
+            y_hat = y_hat[batch.val_mask]
+            y = y[batch.val_mask]
+        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
+
+        self.val_accuracy(y_hat, y)
+        self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
+        # NLL loss
+        y = batch.y
+        if self.config.dataset.uses_mask:
+            y_hat = y_hat[batch.test_mask]
+            y = y[batch.test_mask]
+        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
+
+        self.val_accuracy(y_hat, y)
+        self.log("test_acc", self.val_accuracy, on_step=False, on_epoch=True)
+        return loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+
+
+class LightningTestWrapper(lightning.LightningModule):
+    def __init__(self, model, num_classes, config: Config, class_weights=None):
+        super().__init__()
+        self.save_hyperparameters(ignore=["model"])
+        self.model = model
+        self.config = config
+        self.test_accuracy = Accuracy(
+            task="multiclass", num_classes=num_classes, average="micro"
+        )
+        self.class_weights = class_weights
+
+    def forward(self, x):
+        return self.model(x)
+
+    def test_step(self, batch, batch_idx):
+        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
+        # NLL loss
+        y = batch.y
+        if self.config.dataset.uses_mask:
+            y_hat = y_hat[batch.test_mask]
+            y = y[batch.test_mask]
+
+        loss = F.nll_loss(
+            y_hat,
+            y,
+            weight=self.class_weights.to(dtype=y_hat.dtype, device=y_hat.device),
+        )
+        self.log("test_loss_dt", loss, batch_size=batch.y.size(0), on_epoch=True)
+
+        self.test_accuracy(y_hat, y)
+        self.log("test_acc_dt", self.test_accuracy, on_step=False, on_epoch=True)
+        return loss
+
+
 def train(config: Config):
     dataset = get_dataset(config)
-
-    class LightningModel(lightning.LightningModule):
-        def __init__(self, class_weights=None):
-            super().__init__()
-            self.model = BronzeAgeGNN(
-                dataset.num_node_features, dataset.num_classes, config
-            )
-            self.class_weights = class_weights
-            self.train_accuracy = Accuracy(
-                task="multiclass", num_classes=dataset.num_classes, average="micro"
-            )
-            self.val_accuracy = Accuracy(
-                task="multiclass", num_classes=dataset.num_classes, average="micro"
-            )
-            self.test_accuracy = Accuracy(
-                task="multiclass", num_classes=dataset.num_classes, average="micro"
-            )
-
-        def forward(self, x):
-            return self.model(x)
-
-        def training_step(self, batch, batch_idx):
-            y_hat = self.model(
-                x=batch.x, edge_index=batch.edge_index, batch=batch.batch
-            )
-
-            y = batch.y
-            if config.dataset.uses_mask:
-                y_hat = y_hat[batch.train_mask]
-                y = y[batch.train_mask]
-            loss = F.nll_loss(y_hat, y, weight=self.class_weights)
-            self.log("train_loss", loss, batch_size=batch.y.size(0))
-
-            self.train_accuracy(y_hat, y)
-            self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True)
-            return loss
-
-        def validation_step(self, batch, batch_idx):
-            y_hat = self.model(
-                x=batch.x, edge_index=batch.edge_index, batch=batch.batch
-            )
-            # NLL loss
-            y = batch.y
-            if config.dataset.uses_mask:
-                y_hat = y_hat[batch.val_mask]
-                y = y[batch.val_mask]
-            loss = F.nll_loss(y_hat, y, weight=self.class_weights)
-            self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
-
-            self.val_accuracy(y_hat, y)
-            self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True)
-            return loss
-
-        def test_step(self, batch, batch_idx):
-            y_hat = self.model(
-                x=batch.x, edge_index=batch.edge_index, batch=batch.batch
-            )
-            # NLL loss
-            y = batch.y
-            if config.dataset.uses_mask:
-                y_hat = y_hat[batch.test_mask]
-                y = y[batch.test_mask]
-            loss = F.nll_loss(y_hat, y, weight=self.class_weights)
-            self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
-
-            self.val_accuracy(y_hat, y)
-            self.log("test_acc", self.val_accuracy, on_step=False, on_epoch=True)
-            return loss
-
-        def configure_optimizers(self):
-            return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
-
-    class LightningTestWrapper(lightning.LightningModule):
-        def __init__(self, model, class_weights=None):
-            super().__init__()
-            self.model = model
-            self.test_accuracy = Accuracy(
-                task="multiclass", num_classes=dataset.num_classes, average="micro"
-            )
-            self.class_weights = class_weights
-
-        def forward(self, x):
-            return self.model(x)
-
-        def test_step(self, batch, batch_idx):
-            y_hat = self.model(
-                x=batch.x, edge_index=batch.edge_index, batch=batch.batch
-            )
-            # NLL loss
-            y = batch.y
-            if config.dataset.uses_mask:
-                y_hat = y_hat[batch.test_mask]
-                y = y[batch.test_mask]
-            loss = F.nll_loss(y_hat, y, weight=self.class_weights)
-            self.log("test_loss_dt", loss, batch_size=batch.y.size(0), on_epoch=True)
-
-            self.test_accuracy(y_hat, y)
-            self.log("test_acc_dt", self.test_accuracy, on_step=False, on_epoch=True)
-            return loss
-
-    skf = StratifiedKFold(n_splits=config.num_cv, shuffle=True, random_state=42)
-    if config.dataset.uses_pooling:
-        labels = [graph.y[0] for graph in dataset]
-    elif config.dataset.uses_mask:
-        if len(dataset) == 1:
-            labels = dataset[0].y
-        else:
-            raise NotImplementedError("Masking not implemented for multiple graphs")
-    else:
-        # no pooling and no masking ->
-        # take random graphs from dataset
-        labels = [0 for _ in dataset]
-
+   
     test_accuracies = []
     test_accuracies_dt = []
-    for i, (train_index, test_index) in enumerate(
-        skf.split([0 for _ in labels], labels)
-    ):
-        sss = ShuffleSplit(n_splits=1, test_size=0.1, random_state=41)
 
-        if not config.dataset.uses_mask:
-            # print(len(train_val_dataset))
-            train_val_dataset = dataset[train_index]
-            X = [data.x for data in train_val_dataset]
-            y = [data.y for data in train_val_dataset]
-            train_index, val_index = next(sss.split(X, y))
-
-            train_dataset = train_val_dataset[train_index]
-            val_dataset = train_val_dataset[val_index]
-            test_dataset = dataset[test_index]
-
-            y = np.concatenate(y)
-        else:
-            if len(dataset) == 1:
-                data = dataset[0].clone()
-                X = data.x[train_index].cpu().detach().numpy()
-                y = data.y[train_index].cpu().detach().numpy()
-                train_index_, val_index_ = next(sss.split(X, y))
-                train_mask = train_index[train_index_]
-                val_mask = train_index[val_index_]
-                test_mask = test_index
-                data.train_mask = train_mask
-                data.val_mask = val_mask
-                data.test_mask = test_mask
-                train_dataset = [data]
-                val_dataset = [data]
-                test_dataset = [data]
-            else:
-                raise NotImplementedError("Masking not implemented for multiple graphs")
-
+    split = CrossValidationSplit(config, dataset, random_state=42)
+    for i, (train_dataset, val_dataset, test_dataset) in enumerate(split):
         train_loader = DataLoader(
+            train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=0
+        )
+        train_loader_test = DataLoader(
             train_dataset, batch_size=config.batch_size, shuffle=False, num_workers=0
         )
         val_loader = DataLoader(
@@ -211,8 +195,15 @@ def train(config: Config):
             save_top_k=1, monitor="val_loss", mode="min"
         )
 
-        class_weights = get_class_weights(y, dataset.num_classes, device=None)
-        model = LightningModel(class_weights=class_weights)
+        class_weights = get_class_weights(
+            train_dataset, val_dataset, config, dataset.num_classes, device=None
+        )
+        model = LightningModel(
+            dataset.num_node_features,
+            dataset.num_classes,
+            config,
+            class_weights=class_weights,
+        )
 
         trainer = lightning.Trainer(
             max_epochs=config.max_epochs,
@@ -227,8 +218,9 @@ def train(config: Config):
         best_validation_model = LightningModel.load_from_checkpoint(
             checkpoint_callback.best_model_path
         )
+        
         best_train_accuracy = trainer.test(
-            best_validation_model, train_loader, verbose=False
+            best_validation_model, train_loader_test, verbose=False
         )[0]["test_acc"]
         best_validation_accuracy = trainer.test(
             best_validation_model, val_loader, verbose=False
@@ -240,7 +232,9 @@ def train(config: Config):
         tree_model = train_decision_tree_model(
             model.model, config, dataset.num_classes, train_dataset, val_dataset
         )
-        wrapped_tree_model = LightningTestWrapper(tree_model)
+        wrapped_tree_model = LightningTestWrapper(
+            tree_model, dataset.num_classes, config, class_weights=class_weights
+        )
         test_accuracy_dt = trainer.test(wrapped_tree_model, test_loader, verbose=False)[
             0
         ]["test_acc_dt"]
@@ -376,7 +370,9 @@ if __name__ == "__main__":
             mean_acc_dt,
             std_acc_dt,
         ) in results.items():
-            store_results(results, filename="results_temp.csv", filename2="results2_temp.csv")
+            store_results(
+                results, filename="results_temp_3.csv", filename2="results2_temp_3.csv"
+            )
             if success:
                 print(
                     f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}"
@@ -408,4 +404,4 @@ if __name__ == "__main__":
         else:
             print(f"🛑 {dataset_}")
 
-    store_results(results)
+    store_results(results, filename="results_3.csv", filename2="results2_3.csv")

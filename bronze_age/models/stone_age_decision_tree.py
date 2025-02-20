@@ -1,9 +1,9 @@
-import torch
 import numpy as np
 import shap
+import torch
+from torch_geometric.nn import MessagePassing, global_add_pool
 
 from bronze_age.config import Config
-from torch_geometric.nn import MessagePassing, global_add_pool
 
 
 def linear_combo_features(input_data, state_size):
@@ -204,7 +204,7 @@ class StoneAgeDecisionTree(torch.nn.Module):
         self.tree_depths.append(self.pooling.tree.get_depth())
 
     def forward(self, x, edge_index, batch=None, **kwargs):
-        x = self.input(x)
+        x = self.input(x.float())
         xs = [x]
         for layer in self.stone_age:
             x = layer(x, edge_index)
