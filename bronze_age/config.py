@@ -10,6 +10,12 @@ class NetworkType(StrEnum):
     MLP = "mlp"
 
 
+class LayerType(StrEnum):
+    StoneAge = "stone-age"
+    BronzeAge = "bronze-age"
+    BronzeAgeConcept = "bronze-age-concept"
+
+
 @dataclass
 class Config:
     dataset: DatasetEnum
@@ -31,3 +37,5 @@ class Config:
     learning_rate: float = 0.01
     max_epochs: int = 1500
     num_cv: int = 10
+    train_decision_tree: bool = False
+    layer_type: LayerType = LayerType.BronzeAgeConcept

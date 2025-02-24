@@ -4,7 +4,8 @@ from torch.nn import ModuleList
 from torch.nn.functional import log_softmax
 from torch_geometric.nn import MessagePassing, global_add_pool
 
-from bronze_age.config import Config, NetworkType
+from bronze_age.config import Config, LayerType, NetworkType
+from bronze_age.models.concept_reasoner import ConceptReasoningLayer
 
 
 def to_float_tensor(x):
@@ -193,7 +194,7 @@ class StoneAgeGNNLayer(MessagePassing):
         else:
             self.linear_softmax = LinearSoftmax(in_channels, out_channels, config)
 
-    def forward(self, x, edge_index):
+    def forward(self, x, edge_index, explain=False):
         return self.propagate(edge_index, x=x)
 
     def message(self, x_j):
@@ -206,6 +207,72 @@ class StoneAgeGNNLayer(MessagePassing):
     def update(self, inputs, x):
         combined = torch.cat((inputs, x), 1)
         x = self.linear_softmax(combined)
+        return x
+
+
+class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
+    """This model takes ages to train for some reason... will need to be optimized"""
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        bounding_parameter,
+        config: Config,
+        index=0,
+        a=5,
+        embedding_size=16,
+    ):
+        super().__init__(aggr="add")
+        self.__name__ = "stone-age-" + str(index)
+        self.bounding_parameter = bounding_parameter
+        self.register_buffer("_Y_range", torch.arange(bounding_parameter).float())
+        self.out_channels = out_channels
+        self.a = a
+        self.index = index
+        self.concept_reasoner = ConceptReasoningLayer(
+            emb_size=embedding_size, n_classes=out_channels
+        )
+        self.concept_embeddings = torch.nn.Parameter(
+            torch.randn(
+                in_channels + in_channels * self.bounding_parameter,
+                embedding_size,
+                requires_grad=True,
+            )
+        )
+
+    def forward(self, x, edge_index, explain=False):
+        return self.propagate(edge_index, x=x, explain=explain)
+
+    def message(self, x_j, explain=False):
+        return x_j
+
+    def aggregate(self, inputs, index, ptr, dim_size, explain=False):
+        message_sums = super().aggregate(inputs, index, ptr=ptr, dim_size=dim_size)
+        clamped_sum = torch.clamp(message_sums, min=0, max=self.bounding_parameter)
+        states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
+        states = F.sigmoid(self.a * states)
+        return states.view(*states.shape[:-2], -1)
+
+    def update(self, inputs, x, explain=False):
+        # inputs is one hot encoding of current state
+        # x has shape (num_states * bounding_parameter)
+        # where x.reshape(num_states, bounding_parameter) a per state one-hot encoding
+        # of the number of states in neighborhood
+        # x[i*bounding_parameter + j] = 1 if there are more than j nodes in state i in the neighborhood of our node
+        combined = torch.cat((inputs, x), 1)
+        embedding = self.concept_embeddings.repeat(x.size(0), 1, 1)
+        if explain:
+            # TODO: Better names for concepts and classes
+            explanation = self.concept_reasoner.explain(
+                embedding, combined, mode="global"
+            )
+            print("Layer ", self.index)
+            print(explanation)
+        else:
+            pass
+
+        x = self.concept_reasoner(embedding, combined)
         return x
 
 
@@ -233,20 +300,25 @@ class BronzeAgeGNNLayer(MessagePassing):
                 in_channels + bounding_parameter * in_channels, out_channels, config
             )
 
-    def forward(self, x, edge_index):
-        return self.propagate(edge_index, x=x)
+    def forward(self, x, edge_index, explain=False):
+        return self.propagate(edge_index, x=x, explain=explain)
 
-    def message(self, x_j):
+    def message(self, x_j, explain=False):
         return x_j
 
-    def aggregate(self, inputs, index, ptr, dim_size):
+    def aggregate(self, inputs, index, ptr, dim_size, explain=False):
         message_sums = super().aggregate(inputs, index, ptr=ptr, dim_size=dim_size)
         clamped_sum = torch.clamp(message_sums, min=0, max=self.bounding_parameter)
         states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
         states = F.sigmoid(self.a * states)
         return states.view(*states.shape[:-2], -1)
 
-    def update(self, inputs, x):
+    def update(self, inputs, x, explain=False):
+        # inputs is one hot encoding of current state
+        # x has shape (num_states * bounding_parameter)
+        # where x.reshape(num_states, bounding_parameter) a per state one-hot encoding
+        # of the number of states in neighborhood
+        # x[i*bounding_parameter + j] = 1 if there are more than j nodes in state i in the neighborhood of our node
         combined = torch.cat((inputs, x), 1)
         x = self.linear_softmax(combined)
         return x
@@ -275,8 +347,14 @@ class StoneAgeGNN(torch.nn.Module):
 
         self.stone_age = ModuleList()
         for i in range(num_layers):
+            if config.layer_type == LayerType.BronzeAgeConcept:
+                layer_constructor = BronzeAgeGNNLayerConceptReasoner
+            elif config.layer_type == LayerType.BronzeAge:
+                layer_constructor = BronzeAgeGNNLayer
+            else:
+                layer_constructor = StoneAgeGNNLayer
             self.stone_age.append(
-                StoneAgeGNNLayer(
+                layer_constructor(
                     state_size,
                     state_size,
                     bounding_parameter=bounding_parameter,
@@ -285,11 +363,11 @@ class StoneAgeGNN(torch.nn.Module):
                 )
             )
 
-    def forward(self, x, edge_index, batch=None):
+    def forward(self, x, edge_index, batch=None, explain=False):
         x = self.input(x.float())
         xs = [x]
         for layer in self.stone_age:
-            x = layer(x, edge_index)
+            x = layer(x, edge_index, explain=explain)
             xs.append(x)
 
         if self.use_pooling:
@@ -299,3 +377,7 @@ class StoneAgeGNN(torch.nn.Module):
             x = torch.cat(xs, dim=1)
         x = self.output(x)
         return x
+
+    def explain(self, x, edge_index, batch=None):
+        result = self.forward(x, edge_index, batch=batch, explain=True)
+        # TODO: Implement explanation

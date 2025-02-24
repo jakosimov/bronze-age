@@ -102,6 +102,84 @@ class LightningModel(lightning.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        y_hat = self.model(
+            x=batch.x,
+            edge_index=batch.edge_index,
+            batch=batch.batch,
+        )
+        # NLL loss
+        y = batch.y
+        if self.config.dataset.uses_mask:
+            y_hat = y_hat[batch.val_mask]
+            y = y[batch.val_mask]
+        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
+
+        self.val_accuracy(y_hat, y)
+        self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        y_hat = self.model(
+            x=batch.x, edge_index=batch.edge_index, batch=batch.batch, explain=True
+        )
+        # NLL loss
+        y = batch.y
+        if self.config.dataset.uses_mask:
+            y_hat = y_hat[batch.test_mask]
+            y = y[batch.test_mask]
+        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
+
+        self.val_accuracy(y_hat, y)
+        self.log("test_acc", self.val_accuracy, on_step=False, on_epoch=True)
+        return loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+
+
+class LightningWrapper(lightning.LightningModule):
+    def __init__(
+        self,
+        model,
+        num_classes: int,
+        config: Config,
+        class_weights=None,
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+        self.config = config
+        self.model = model
+        self.class_weights = class_weights
+        self.train_accuracy = Accuracy(
+            task="multiclass", num_classes=num_classes, average="micro"
+        )
+        self.val_accuracy = Accuracy(
+            task="multiclass", num_classes=num_classes, average="micro"
+        )
+        self.test_accuracy = Accuracy(
+            task="multiclass", num_classes=num_classes, average="micro"
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
+
+        y = batch.y
+        if self.config.dataset.uses_mask:
+            y_hat = y_hat[batch.train_mask]
+            y = y[batch.train_mask]
+        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        self.log("train_loss", loss, batch_size=batch.y.size(0))
+
+        self.train_accuracy(y_hat, y)
+        self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
         y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
         # NLL loss
         y = batch.y
@@ -169,7 +247,7 @@ class LightningTestWrapper(lightning.LightningModule):
 
 def train(config: Config):
     dataset = get_dataset(config)
-   
+
     test_accuracies = []
     test_accuracies_dt = []
 
@@ -229,23 +307,25 @@ def train(config: Config):
             0
         ]["test_acc"]
 
-        tree_model = train_decision_tree_model(
-            model.model, config, dataset.num_classes, train_dataset, val_dataset
-        )
-        wrapped_tree_model = LightningTestWrapper(
-            tree_model, dataset.num_classes, config, class_weights=class_weights
-        )
-        test_accuracy_dt = trainer.test(wrapped_tree_model, test_loader, verbose=False)[
-            0
-        ]["test_acc_dt"]
-        test_accuracies_dt.append(test_accuracy_dt)
+        if config.train_decision_tree:
+            tree_model = train_decision_tree_model(
+                model.model, config, dataset.num_classes, train_dataset, val_dataset
+            )
+            wrapped_tree_model = LightningTestWrapper(
+                tree_model, dataset.num_classes, config, class_weights=class_weights
+            )
+            test_accuracy_dt = trainer.test(
+                wrapped_tree_model, test_loader, verbose=False
+            )[0]["test_acc_dt"]
+            test_accuracies_dt.append(test_accuracy_dt)
 
         print(f"=====================")
         print(f"Fold {i+1}/{config.num_cv}")
         print(f"Train accuracy: {best_train_accuracy}")
         print(f"Validation accuracy: {best_validation_accuracy}")
         print(f"Test accuracy: {test_accuracy}")
-        print(f"Test accuracy DT: {test_accuracy_dt}")
+        if config.train_decision_tree:
+            print(f"Test accuracy DT: {test_accuracy_dt}")
         print(f"=====================")
 
         test_accuracies.append(test_accuracy)
@@ -254,9 +334,10 @@ def train(config: Config):
     print(
         f"Average test accuracy: {np.mean(test_accuracies)} with std: {np.std(test_accuracies)}"
     )
-    print(
-        f"Average test accuracy DT: {np.mean(test_accuracies_dt)} with std: {np.std(test_accuracies_dt)}"
-    )
+    if config.train_decision_tree:
+        print(
+            f"Average test accuracy DT: {np.mean(test_accuracies_dt)} with std: {np.std(test_accuracies_dt)}"
+        )
     print(f"=====================")
 
     return (
@@ -308,10 +389,10 @@ def get_config_for_dataset(dataset, **kwargs):
         "network": NetworkType.MLP,
         "hidden_units": 16,
         "skip_connection": True,
-        "bounding_parameter": 1000,
+        "bounding_parameter": 20,
         "batch_size": 128,
         "learning_rate": 0.01,
-        "max_epochs": 1500,
+        "max_epochs": 15,
         "num_cv": 10,
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
@@ -361,6 +442,7 @@ if __name__ == "__main__":
         DatasetEnum.REDDIT_BINARY,
         DatasetEnum.COLLAB,
     ]
+    datasets = [DatasetEnum.PROTEINS]
 
     for dataset in datasets:
         for dataset_, (
