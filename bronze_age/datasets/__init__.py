@@ -12,6 +12,7 @@ from torch_geometric.transforms import Compose
 
 from bronze_age.datasets.infection import Infection
 from bronze_age.datasets.saturation import Saturation
+from bronze_age.datasets.simple_saturation import SimpleSaturation
 
 
 class CustomDataset:
@@ -88,6 +89,7 @@ class DatasetEnum(StrEnum):
     OGB_MOLHIV = "OGB-molhiv"
     OGB_PPA = "OGB-ppa"
     OGB_CODE2 = "OGB-code2"
+    SIMPLE_SATURATION = "Simple_Saturation"
 
     @property
     def uses_pooling(self):
@@ -128,6 +130,17 @@ _DATASETS = {
     DatasetEnum.SATURATION: lambda c: CustomDataset(
         [
             Saturation(
+                sample_count=1,
+                num_layers=c.num_layers,
+                concat_features=False,
+                conv_type=None,
+            ).create_dataset()
+            for _ in range(10)
+        ]
+    ),
+    DatasetEnum.SIMPLE_SATURATION: lambda c: CustomDataset(
+        [
+            SimpleSaturation(
                 sample_count=1,
                 num_layers=c.num_layers,
                 concat_features=False,
@@ -189,6 +202,7 @@ _USES_POOLING = {
     DatasetEnum.OGB_MOLHIV: True,
     DatasetEnum.OGB_PPA: True,
     DatasetEnum.OGB_CODE2: True,
+    DatasetEnum.SIMPLE_SATURATION: False,
 }
 
 _USES_MASK = {
@@ -212,6 +226,7 @@ _USES_MASK = {
     DatasetEnum.OGB_MOLHIV: False,
     DatasetEnum.OGB_PPA: False,
     DatasetEnum.OGB_CODE2: False,
+    DatasetEnum.SIMPLE_SATURATION: False,
 }
 
 
