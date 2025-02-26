@@ -364,6 +364,7 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.IMDB_BINARY: 3,
         DatasetEnum.REDDIT_BINARY: 2,
         DatasetEnum.COLLAB: 3,
+        DatasetEnum.SIMPLE_SATURATION: 1,
     }
     NUM_STATES = {
         DatasetEnum.INFECTION: 6,
@@ -380,6 +381,7 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.IMDB_BINARY: 5,
         DatasetEnum.REDDIT_BINARY: 5,
         DatasetEnum.COLLAB: 8,
+        DatasetEnum.SIMPLE_SATURATION: 3,
     }
     config = {
         "data_dir": "downloads",

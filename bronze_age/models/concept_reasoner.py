@@ -1,6 +1,7 @@
-import torch
-from collections import Counter
 import abc
+from collections import Counter
+
+import torch
 
 
 class Logic:
