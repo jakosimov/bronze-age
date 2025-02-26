@@ -233,12 +233,11 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         self.concept_reasoner = ConceptReasoningLayer(
             emb_size=embedding_size, n_classes=out_channels
         )
-        self.concept_embeddings = torch.nn.Parameter(
-            torch.randn(
-                in_channels + in_channels * self.bounding_parameter,
-                embedding_size,
-                requires_grad=True,
-            )
+        self.pos_embeddings = torch.nn.Embedding(
+            in_channels + in_channels * self.bounding_parameter, embedding_size
+        )
+        self.neg_embeddings = torch.nn.Embedding(
+            in_channels + in_channels * self.bounding_parameter, embedding_size
         )
 
     def forward(self, x, edge_index, explain=False):
@@ -260,8 +259,8 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         # where x.reshape(num_states, bounding_parameter) a per state one-hot encoding
         # of the number of states in neighborhood
         # x[i*bounding_parameter + j] = 1 if there are more than j nodes in state i in the neighborhood of our node
-        combined = torch.cat((inputs, x), 1)
-        embedding = self.concept_embeddings.repeat(x.size(0), 1, 1)
+        combined = torch.cat((x, inputs), 1)
+        embedding = combined[..., None] * self.pos_embeddings.weight[None, ...] + (1 - combined[..., None]) * self.neg_embeddings.weight[None, ...]
         if explain:
             # TODO: Better names for concepts and classes
             explanation = self.concept_reasoner.explain(

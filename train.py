@@ -13,7 +13,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from torch_geometric.loader import DataLoader
 from torchmetrics.classification import Accuracy
 
-from bronze_age.config import Config, NetworkType
+from bronze_age.config import Config, LayerType, NetworkType
 from bronze_age.datasets import DatasetEnum, get_dataset
 from bronze_age.datasets.cross_validation import CrossValidationSplit
 from bronze_age.models.decision_tree import train_decision_tree_model
@@ -389,14 +389,15 @@ def get_config_for_dataset(dataset, **kwargs):
         "network": NetworkType.MLP,
         "hidden_units": 16,
         "skip_connection": True,
-        "bounding_parameter": 20,
+        "bounding_parameter": 10,
         "batch_size": 128,
         "learning_rate": 0.01,
-        "max_epochs": 15,
+        "max_epochs": 1500,
         "num_cv": 10,
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
+        "layer_type": LayerType.BronzeAgeConcept,
     }
     config.update(kwargs)
     return Config(**config)
@@ -442,7 +443,7 @@ if __name__ == "__main__":
         DatasetEnum.REDDIT_BINARY,
         DatasetEnum.COLLAB,
     ]
-    datasets = [DatasetEnum.PROTEINS]
+    datasets = [DatasetEnum.SATURATION]
 
     for dataset in datasets:
         for dataset_, (

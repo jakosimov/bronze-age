@@ -30,7 +30,7 @@ class Config:
     state_size: int = 10
     num_layers: int = 5
     skip_connection: bool = True
-    bounding_parameter: int = 1000
+    bounding_parameter: int = 10
     batch_size: int = 128
     device: str = "mps"
     max_leaf_nodes: int = 100
