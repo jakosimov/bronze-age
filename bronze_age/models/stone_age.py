@@ -227,6 +227,7 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         self.__name__ = "stone-age-" + str(index)
         self.bounding_parameter = bounding_parameter
         self.register_buffer("_Y_range", torch.arange(bounding_parameter).float())
+        self.in_channels = in_channels
         self.out_channels = out_channels
         self.a = a
         self.index = index
@@ -260,11 +261,19 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         # of the number of states in neighborhood
         # x[i*bounding_parameter + j] = 1 if there are more than j nodes in state i in the neighborhood of our node
         combined = torch.cat((x, inputs), 1)
-        embedding = combined[..., None] * self.pos_embeddings.weight[None, ...] + (1 - combined[..., None]) * self.neg_embeddings.weight[None, ...]
+        embedding = (
+            combined[..., None] * self.pos_embeddings.weight[None, ...]
+            + (1 - combined[..., None]) * self.neg_embeddings.weight[None, ...]
+        )
         if explain:
+            names = [f"s_{i}" for i in range(self.in_channels)] + [
+                f"s_{i}_count>{j}"
+                for i in range(self.in_channels)
+                for j in range(self.bounding_parameter)
+            ]
             # TODO: Better names for concepts and classes
             explanation = self.concept_reasoner.explain(
-                embedding, combined, mode="global"
+                embedding, combined, mode="global", concept_names=names
             )
             print("Layer ", self.index)
             print(explanation)

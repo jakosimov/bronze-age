@@ -110,7 +110,7 @@ class ConceptReasoningLayer(torch.nn.Module):
         emb_size,
         n_classes,
         logic: Logic = GodelTNorm(),
-        temperature: float = 100.0,
+        temperature: float = 0.5,
     ):
         super().__init__()
         self.emb_size = emb_size

@@ -352,6 +352,7 @@ def get_config_for_dataset(dataset, **kwargs):
     NUM_LAYERS = {
         DatasetEnum.INFECTION: 5,
         DatasetEnum.SATURATION: 1,
+        DatasetEnum.SIMPLE_SATURATION: 1,
         DatasetEnum.BA_SHAPES: 5,
         DatasetEnum.TREE_CYCLE: 5,
         DatasetEnum.TREE_GRID: 5,
@@ -367,6 +368,7 @@ def get_config_for_dataset(dataset, **kwargs):
     NUM_STATES = {
         DatasetEnum.INFECTION: 6,
         DatasetEnum.SATURATION: 3,
+        DatasetEnum.SIMPLE_SATURATION: 3,
         DatasetEnum.BA_SHAPES: 5,
         DatasetEnum.TREE_CYCLE: 5,
         DatasetEnum.TREE_GRID: 5,
@@ -443,7 +445,7 @@ if __name__ == "__main__":
         DatasetEnum.REDDIT_BINARY,
         DatasetEnum.COLLAB,
     ]
-    datasets = [DatasetEnum.SATURATION]
+    datasets = [DatasetEnum.SIMPLE_SATURATION]
 
     for dataset in datasets:
         for dataset_, (
