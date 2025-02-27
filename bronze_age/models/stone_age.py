@@ -9,6 +9,7 @@ from bronze_age.models.concept_reasoner import (
     ConceptReasoningLayer,
     GlobalConceptReasoningLayer,
 )
+import random
 
 
 def to_float_tensor(x):
@@ -213,9 +214,63 @@ class StoneAgeGNNLayer(MessagePassing):
         return x
 
 
-class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
-    """This model takes ages to train for some reason... will need to be optimized"""
+def generate_names(n_concepts, in_channels, bounding_parameter):
+    names = [f"s_{i}" for i in range(n_concepts)] + [
+        f"s_{i}_count>{j}"
+        for i in range(in_channels)
+        for j in range(bounding_parameter)
+    ]
+    return names
 
+
+class ConceptReasonerModule(torch.nn.Module):
+    def __init__(self, n_concepts, n_classes, emb_size):
+        super(ConceptReasonerModule, self).__init__()
+        self.emb_size = emb_size
+        self.n_classes = n_classes
+        self.n_concepts = n_concepts
+        self.concept_reasoner = ConceptReasoningLayer(
+            emb_size=emb_size, n_classes=n_classes
+        )
+        self.pos_embeddings = torch.nn.Embedding(n_concepts, emb_size)
+        self.neg_embeddings = torch.nn.Embedding(n_concepts, emb_size)
+
+    def forward(self, combined, return_explanation=False, concept_names=None):
+        embedding = (
+            combined[..., None] * self.pos_embeddings.weight[None, ...]
+            + (1 - combined[..., None]) * self.neg_embeddings.weight[None, ...]
+        )
+
+        x = self.concept_reasoner(embedding, combined)
+
+        if return_explanation:
+            explanation = self.concept_reasoner.explain(
+                embedding, combined, mode="global", concept_names=concept_names
+            )
+            return x, explanation
+
+        return x
+
+
+class GlobalConceptReasonerModule(torch.nn.Module):
+    def __init__(self, n_concepts, n_classes):
+        super(GlobalConceptReasonerModule, self).__init__()
+        self.n_classes = n_classes
+        self.concept_reasoner = GlobalConceptReasoningLayer(n_concepts, n_classes)
+
+    def forward(self, combined, return_explanation=False, concept_names=None):
+        x = self.concept_reasoner(combined)
+
+        if return_explanation:
+            explanation = self.concept_reasoner.explain(
+                combined, mode="global", concept_names=concept_names
+            )
+            return x, explanation
+
+        return x
+
+
+class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
     def __init__(
         self,
         in_channels,
@@ -235,18 +290,14 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         self.a = a
         self.index = index
         if config.layer_type == LayerType.BronzeAgeConcept:
-            self.concept_reasoner = ConceptReasoningLayer(
-                emb_size=embedding_size, n_classes=out_channels
-            )
-            self.pos_embeddings = torch.nn.Embedding(
-                in_channels + in_channels * self.bounding_parameter, embedding_size
-            )
-            self.neg_embeddings = torch.nn.Embedding(
-                in_channels + in_channels * self.bounding_parameter, embedding_size
+            self.reasoning_module = ConceptReasonerModule(
+                n_concepts=in_channels + in_channels * bounding_parameter,
+                emb_size=embedding_size,
+                n_classes=out_channels,
             )
         elif config.layer_type == LayerType.BronzeAgeGeneralConcept:
-            self.concept_reasoner = GlobalConceptReasoningLayer(
-                in_channels + in_channels * self.bounding_parameter,
+            self.reasoning_module = GlobalConceptReasonerModule(
+                n_concepts=in_channels + in_channels * bounding_parameter,
                 n_classes=out_channels,
             )
         else:
@@ -277,37 +328,22 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         # x[i*bounding_parameter + j] = 1 if there are more than j nodes in state i in the neighborhood of our node
         combined = torch.cat((x, inputs), 1)
 
-        is_concept_reasoner = isinstance(self.concept_reasoner, ConceptReasoningLayer)
-
-        if is_concept_reasoner:
-            embedding = (
-                combined[..., None] * self.pos_embeddings.weight[None, ...]
-                + (1 - combined[..., None]) * self.neg_embeddings.weight[None, ...]
-            )
         if explain:
-            names = [f"s_{i}" for i in range(self.in_channels)] + [
-                f"s_{i}_count>{j}"
-                for i in range(self.in_channels)
-                for j in range(self.bounding_parameter)
-            ]
-            # TODO: Better names for concepts and classes
-            if is_concept_reasoner:
-                explanation = self.concept_reasoner.explain(
-                    embedding, combined, mode="global", concept_names=names
-                )
-            else:
-                explanation = self.concept_reasoner.explain(
-                    combined, mode="global", concept_names=names
-                )
+            concept_names = generate_names(
+                self.in_channels, self.in_channels, self.bounding_parameter
+            )
+            x, explanation = self.reasoning_module(
+                combined,
+                return_explanation=True,
+                concept_names=concept_names,
+            )
             print("Layer ", self.index)
             print(explanation)
         else:
-            pass
+            x = self.reasoning_module(combined)
 
-        if is_concept_reasoner:
-            x = self.concept_reasoner(embedding, combined)
-        else:
-            x = self.concept_reasoner(combined)
+        # if random.random() < 0.05:
+        #     print(x[0])
         if return_entropy:
             return x, torch.sum((x * (1 - x)) ** 2)
         return x
@@ -371,22 +407,38 @@ class StoneAgeGNN(torch.nn.Module):
         num_layers = config.num_layers
         bounding_parameter = config.bounding_parameter
 
-        # self.num_layers = num_layers
+        input_emb_size = 16
+        output_emb_size = 32
 
-        self.input = InputLayer(in_channels, state_size, config)
+        self.is_interpretable = (
+            config.layer_type == LayerType.BronzeAgeConcept
+            or config.layer_type == LayerType.BronzeAgeGeneralConcept
+        )
+
+        if self.is_interpretable:
+            self.input = InputLayer(in_channels, state_size, config)
+        else:
+            self.input = ConceptReasonerModule(
+                n_concepts=in_channels, emb_size=input_emb_size, n_classes=state_size
+            )
 
         if self.skip_connection:
-            self.output = PoolingLayer(
-                (num_layers + 1) * state_size, out_channels, config=config
+            final_layer_inputs = (num_layers + 1) * state_size
+        else:
+            final_layer_inputs = state_size
+
+        if False:  # This gives awful results
+            self.output = ConceptReasonerModule(
+                n_concepts=final_layer_inputs,
+                n_classes=out_channels,
+                emb_size=output_emb_size,
             )
         else:
-            self.output = PoolingLayer(state_size, out_channels, config)
+            self.output = PoolingLayer(final_layer_inputs, out_channels, config=config)
 
         self.stone_age = ModuleList()
         for i in range(num_layers):
-            if (config.layer_type == LayerType.BronzeAgeConcept) or (
-                config.layer_type == LayerType.BronzeAgeGeneralConcept
-            ):
+            if self.is_interpretable:
                 layer_constructor = BronzeAgeGNNLayerConceptReasoner
             elif config.layer_type == LayerType.BronzeAge:
                 layer_constructor = BronzeAgeGNNLayer
@@ -413,8 +465,6 @@ class StoneAgeGNN(torch.nn.Module):
             else:
                 x = layer(x, edge_index, explain=explain)
             xs.append(x)
-        # if return_entropy:
-        #     print(entropy)
 
         if self.use_pooling:
             x = global_add_pool(x, batch)

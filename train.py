@@ -100,10 +100,10 @@ class LightningModel(lightning.LightningModule):
             y_hat = y_hat[batch.train_mask]
             y = y[batch.train_mask]
         entropy_loss = torch.sum(entropy) / y.size(0)
-        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
         # print("loss", loss)
         # print("entropy_loss", entropy_loss)
-        final_loss = loss + 0.0 * entropy_loss
+        final_loss = loss + 0.1 * entropy_loss
         self.log("train_loss", final_loss, batch_size=batch.y.size(0))
 
         self.train_accuracy(y_hat, y)
@@ -121,7 +121,7 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.val_mask]
             y = y[batch.val_mask]
-        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
         self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -137,7 +137,7 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.test_mask]
             y = y[batch.test_mask]
-        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
         self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -181,7 +181,7 @@ class LightningWrapper(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.train_mask]
             y = y[batch.train_mask]
-        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
         self.log("train_loss", loss, batch_size=batch.y.size(0))
 
         self.train_accuracy(y_hat, y)
@@ -195,7 +195,7 @@ class LightningWrapper(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.val_mask]
             y = y[batch.val_mask]
-        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
         self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -209,7 +209,7 @@ class LightningWrapper(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.test_mask]
             y = y[batch.test_mask]
-        loss = F.nll_loss(y_hat, y, weight=self.class_weights)
+        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
         self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -401,7 +401,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "use_batch_norm": True,
         "network": NetworkType.MLP,
         "hidden_units": 16,
-        "skip_connection": True,
+        "skip_connection": False,
         "bounding_parameter": 10,
         "batch_size": 128,
         "learning_rate": 0.02,
@@ -410,7 +410,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.BronzeAgeGeneralConcept,
+        "layer_type": LayerType.BronzeAgeConcept,
     }
     config.update(kwargs)
     return Config(**config)
