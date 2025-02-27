@@ -88,18 +88,27 @@ class LightningModel(lightning.LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
+        y_hat, entropy = self.model(
+            x=batch.x,
+            edge_index=batch.edge_index,
+            batch=batch.batch,
+            return_entropy=True,
+        )
 
         y = batch.y
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.train_mask]
             y = y[batch.train_mask]
+        entropy_loss = torch.sum(entropy) / y.size(0)
         loss = F.nll_loss(y_hat, y, weight=self.class_weights)
-        self.log("train_loss", loss, batch_size=batch.y.size(0))
+        # print("loss", loss)
+        # print("entropy_loss", entropy_loss)
+        final_loss = loss + 0.0 * entropy_loss
+        self.log("train_loss", final_loss, batch_size=batch.y.size(0))
 
         self.train_accuracy(y_hat, y)
         self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True)
-        return loss
+        return final_loss
 
     def validation_step(self, batch, batch_idx):
         y_hat = self.model(

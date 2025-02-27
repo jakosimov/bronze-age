@@ -241,20 +241,24 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
             in_channels + in_channels * self.bounding_parameter, embedding_size
         )
 
-    def forward(self, x, edge_index, explain=False):
-        return self.propagate(edge_index, x=x, explain=explain)
+    def forward(self, x, edge_index, explain=False, return_entropy=False):
+        return self.propagate(
+            edge_index, x=x, explain=explain, return_entropy=return_entropy
+        )
 
     def message(self, x_j, explain=False):
         return x_j
 
-    def aggregate(self, inputs, index, ptr, dim_size, explain=False):
+    def aggregate(
+        self, inputs, index, ptr, dim_size, explain=False, return_entropy=False
+    ):
         message_sums = super().aggregate(inputs, index, ptr=ptr, dim_size=dim_size)
         clamped_sum = torch.clamp(message_sums, min=0, max=self.bounding_parameter)
         states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
         states = F.sigmoid(self.a * states)
         return states.view(*states.shape[:-2], -1)
 
-    def update(self, inputs, x, explain=False):
+    def update(self, inputs, x, explain=False, return_entropy=False):
         # inputs is one hot encoding of current state
         # x has shape (num_states * bounding_parameter)
         # where x.reshape(num_states, bounding_parameter) a per state one-hot encoding
@@ -281,6 +285,9 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
             pass
 
         x = self.concept_reasoner(embedding, combined)
+        # print(x[0])
+        if return_entropy:
+            return x, torch.sum((x * (1 - x)) ** 2)
         return x
 
 
@@ -371,12 +378,19 @@ class StoneAgeGNN(torch.nn.Module):
                 )
             )
 
-    def forward(self, x, edge_index, batch=None, explain=False):
+    def forward(self, x, edge_index, batch=None, explain=False, return_entropy=False):
         x = self.input(x.float())
         xs = [x]
+        entropy = 0
         for layer in self.stone_age:
-            x = layer(x, edge_index, explain=explain)
+            if return_entropy:
+                x, ent = layer(x, edge_index, explain=explain, return_entropy=True)
+                entropy += ent
+            else:
+                x = layer(x, edge_index, explain=explain)
             xs.append(x)
+        # if return_entropy:
+        #     print(entropy)
 
         if self.use_pooling:
             x = global_add_pool(x, batch)
@@ -384,6 +398,8 @@ class StoneAgeGNN(torch.nn.Module):
         if self.skip_connection:
             x = torch.cat(xs, dim=1)
         x = self.output(x)
+        if return_entropy:
+            return x, entropy
         return x
 
     def explain(self, x, edge_index, batch=None):
