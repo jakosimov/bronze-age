@@ -5,7 +5,10 @@ from torch.nn.functional import log_softmax
 from torch_geometric.nn import MessagePassing, global_add_pool
 
 from bronze_age.config import Config, LayerType, NetworkType
-from bronze_age.models.concept_reasoner import ConceptReasoningLayer
+from bronze_age.models.concept_reasoner import (
+    ConceptReasoningLayer,
+    GlobalConceptReasoningLayer,
+)
 
 
 def to_float_tensor(x):
@@ -220,7 +223,7 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         bounding_parameter,
         config: Config,
         index=0,
-        a=5,
+        a=10,
         embedding_size=16,
     ):
         super().__init__(aggr="add")
@@ -231,15 +234,22 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         self.out_channels = out_channels
         self.a = a
         self.index = index
-        self.concept_reasoner = ConceptReasoningLayer(
-            emb_size=embedding_size, n_classes=out_channels
-        )
-        self.pos_embeddings = torch.nn.Embedding(
-            in_channels + in_channels * self.bounding_parameter, embedding_size
-        )
-        self.neg_embeddings = torch.nn.Embedding(
-            in_channels + in_channels * self.bounding_parameter, embedding_size
-        )
+        if config.layer_type == LayerType.BronzeAgeConcept:
+            self.concept_reasoner = ConceptReasoningLayer(
+                emb_size=embedding_size, n_classes=out_channels
+            )
+            self.pos_embeddings = torch.nn.Embedding(
+                in_channels + in_channels * self.bounding_parameter, embedding_size
+            )
+            self.neg_embeddings = torch.nn.Embedding(
+                in_channels + in_channels * self.bounding_parameter, embedding_size
+            )
+        elif config.layer_type == LayerType.BronzeAgeGeneralConcept:
+            self.concept_reasoner = GlobalConceptReasoningLayer(
+                in_channels + in_channels * self.bounding_parameter, n_classes=out_channels
+            )
+        else:
+            raise ValueError(f"Invalid layer type {config.layer_type}")
 
     def forward(self, x, edge_index, explain=False):
         return self.propagate(edge_index, x=x, explain=explain)
@@ -261,10 +271,14 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         # of the number of states in neighborhood
         # x[i*bounding_parameter + j] = 1 if there are more than j nodes in state i in the neighborhood of our node
         combined = torch.cat((x, inputs), 1)
-        embedding = (
-            combined[..., None] * self.pos_embeddings.weight[None, ...]
-            + (1 - combined[..., None]) * self.neg_embeddings.weight[None, ...]
-        )
+
+        is_concept_reasoner = isinstance(self.concept_reasoner, ConceptReasoningLayer)
+
+        if is_concept_reasoner:
+            embedding = (
+                combined[..., None] * self.pos_embeddings.weight[None, ...]
+                + (1 - combined[..., None]) * self.neg_embeddings.weight[None, ...]
+            )
         if explain:
             names = [f"s_{i}" for i in range(self.in_channels)] + [
                 f"s_{i}_count>{j}"
@@ -272,15 +286,23 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
                 for j in range(self.bounding_parameter)
             ]
             # TODO: Better names for concepts and classes
-            explanation = self.concept_reasoner.explain(
-                embedding, combined, mode="global", concept_names=names
-            )
+            if is_concept_reasoner:
+                explanation = self.concept_reasoner.explain(
+                    embedding, combined, mode="global", concept_names=names
+                )
+            else:
+                explanation = self.concept_reasoner.explain(
+                    combined, mode="global", concept_names=names
+                )
             print("Layer ", self.index)
             print(explanation)
         else:
             pass
-
-        x = self.concept_reasoner(embedding, combined)
+        
+        if is_concept_reasoner:
+            x = self.concept_reasoner(embedding, combined)
+        else:
+            x = self.concept_reasoner(combined)
         return x
 
 
@@ -292,7 +314,7 @@ class BronzeAgeGNNLayer(MessagePassing):
         bounding_parameter,
         config: Config,
         index=0,
-        a=5,
+        a=10,
     ):
         super().__init__(aggr="add")
         self.__name__ = "stone-age-" + str(index)
@@ -355,7 +377,7 @@ class StoneAgeGNN(torch.nn.Module):
 
         self.stone_age = ModuleList()
         for i in range(num_layers):
-            if config.layer_type == LayerType.BronzeAgeConcept:
+            if (config.layer_type == LayerType.BronzeAgeConcept) or (config.layer_type == LayerType.BronzeAgeGeneralConcept):
                 layer_constructor = BronzeAgeGNNLayerConceptReasoner
             elif config.layer_type == LayerType.BronzeAge:
                 layer_constructor = BronzeAgeGNNLayer
