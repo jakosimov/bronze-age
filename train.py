@@ -404,13 +404,13 @@ def get_config_for_dataset(dataset, **kwargs):
         "skip_connection": True,
         "bounding_parameter": 10,
         "batch_size": 128,
-        "learning_rate": 0.01,
+        "learning_rate": 0.02,
         "max_epochs": 1500,
         "num_cv": 10,
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.BronzeAgeConcept,
+        "layer_type": LayerType.BronzeAgeGeneralConcept,
     }
     config.update(kwargs)
     return Config(**config)
@@ -428,12 +428,14 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
         + " ± "
         + df["std_acc"].map("{:.2f}".format, na_action="ignore")
     )
-    df2["DT"] = (
-        df["mean_acc_dt"].map("{:.2f}".format, na_action="ignore")
-        + " ± "
-        + df["std_acc_dt"].map("{:.2f}".format, na_action="ignore")
-    )
     df.to_csv(filename)
+    df2["DT"] = (
+        df["mean_acc_dt"].fillna(-1).map("{:.2f}".format, na_action="ignore")
+        + " ± "
+        + df["std_acc_dt"].fillna(-1).map("{:.2f}".format, na_action="ignore")
+    )
+    df2.loc[df["mean_acc_dt"].isna(), "DT"] = "N/A"
+
     df2.to_csv(filename2)
 
     print(df2)

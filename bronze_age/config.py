@@ -14,6 +14,7 @@ class LayerType(StrEnum):
     StoneAge = "stone-age"
     BronzeAge = "bronze-age"
     BronzeAgeConcept = "bronze-age-concept"
+    BronzeAgeGeneralConcept = "bronze-age-general-concept"
 
 
 @dataclass
