@@ -404,7 +404,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "skip_connection": False,
         "bounding_parameter": 10,
         "batch_size": 128,
-        "learning_rate": 0.02,
+        "learning_rate": 0.01,
         "max_epochs": 1500,
         "num_cv": 10,
         "dataset": dataset,

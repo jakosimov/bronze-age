@@ -1,3 +1,5 @@
+import random
+
 import torch
 import torch.nn.functional as F
 from torch.nn import ModuleList
@@ -9,7 +11,6 @@ from bronze_age.models.concept_reasoner import (
     ConceptReasoningLayer,
     GlobalConceptReasoningLayer,
 )
-import random
 
 
 def to_float_tensor(x):
@@ -232,14 +233,18 @@ class ConceptReasonerModule(torch.nn.Module):
         self.concept_reasoner = ConceptReasoningLayer(
             emb_size=emb_size, n_classes=n_classes
         )
-        self.pos_embeddings = torch.nn.Embedding(n_concepts, emb_size)
-        self.neg_embeddings = torch.nn.Embedding(n_concepts, emb_size)
+        self.concept_context_generator = torch.nn.Sequential(
+                torch.nn.Linear(self.n_concepts, 2 * emb_size * self.n_concepts),
+                torch.nn.LeakyReLU(),
+            )
 
     def forward(self, combined, return_explanation=False, concept_names=None):
-        embedding = (
-            combined[..., None] * self.pos_embeddings.weight[None, ...]
-            + (1 - combined[..., None]) * self.neg_embeddings.weight[None, ...]
-        )
+        concept_embs = self.concept_context_generator(combined)
+        concept_embs_shape = combined.shape[:-1] + (self.n_concepts, 2 * self.emb_size)
+        concept_embs = concept_embs.view(*concept_embs_shape)
+        concept_pos = concept_embs[..., :self.emb_size]
+        concept_neg = concept_embs[..., self.emb_size:]
+        embedding = concept_pos * combined[..., None] + concept_neg * (1 - combined[..., None])
 
         x = self.concept_reasoner(embedding, combined)
 
@@ -287,6 +292,8 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         self.register_buffer("_Y_range", torch.arange(bounding_parameter).float())
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.embedding_size = embedding_size
+        self.n_concepts = in_channels + in_channels * bounding_parameter
         self.a = a
         self.index = index
         if config.layer_type == LayerType.BronzeAgeConcept:
