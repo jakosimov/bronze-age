@@ -233,7 +233,8 @@ def train(config: Config):
             max_epochs=config.max_epochs,
             log_every_n_steps=1,
             accelerator="cpu",
-            callbacks=[early_stopping, checkpoint_callback],
+            callbacks=[checkpoint_callback]
+            + ([early_stopping] if config.early_stopping else []),
             enable_model_summary=False,
             enable_progress_bar=False,
             logger=logger,
@@ -353,6 +354,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "concept_embedding_size": 16,
         "concept_temperature": 0.5,
         "entropy_loss_scaling": 0.1,
+        "early_stopping": False,
     }
     config.update(kwargs)
     return Config(**config)

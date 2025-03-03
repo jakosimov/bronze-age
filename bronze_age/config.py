@@ -44,3 +44,4 @@ class Config:
     concept_embedding_size: int = 16
     concept_temperature: float = 0.5
     entropy_loss_scaling: float = 0.2
+    early_stopping: bool = True
