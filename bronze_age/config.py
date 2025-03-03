@@ -40,3 +40,7 @@ class Config:
     num_cv: int = 10
     train_decision_tree: bool = False
     layer_type: LayerType = LayerType.BronzeAgeConcept
+    use_one_hot_output: bool = False
+    concept_embedding_size: int = 16
+    concept_temperature: float = 0.5
+    entropy_loss_scaling: float = 0.1

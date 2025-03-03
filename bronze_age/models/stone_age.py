@@ -56,6 +56,20 @@ class ArgMax(torch.autograd.Function):
         return grad
 
 
+def differentiable_argmax(x):
+    y_soft = x.softmax(dim=-1)
+    index = y_soft.max(-1, keepdim=True)[1]
+    y_hard = torch.zeros_like(x, memory_format=torch.legacy_contiguous_format).scatter_(
+        -1, index, 1.0
+    )
+
+    # Return y_hard detached to prevent mixing correct gradients
+
+    # Use the STE trick:
+    # We add the softmax and subtract the detached softmax, letting the gradient pass through
+    return y_hard.detach() + y_soft - y_soft.detach()
+
+
 def argmax(x):
     # Create a wrapper that only returns the first output
     return ArgMax.apply(x)[0]
@@ -82,7 +96,7 @@ class MLP(torch.nn.Module):
         for bn in self.bns:
             bn.reset_parameters()
 
-    def forward(self, x):
+    def forward(self, x, explain=False):
         for i, lin in enumerate(self.lins[:-1]):
             x = lin(x)
             x = self.bns[i](x)
@@ -112,7 +126,7 @@ class SoftmaxLayer(torch.nn.Module):
         # return self.config.activation == ActivationType.ARGMAX
         return not self.training
 
-    def forward(self, x):
+    def forward(self, x, explain=False):
         x = self.lin1(x)
 
         if self.use_batch_norm:
@@ -225,26 +239,30 @@ def generate_names(n_concepts, in_channels, bounding_parameter):
 
 
 class ConceptReasonerModule(torch.nn.Module):
-    def __init__(self, n_concepts, n_classes, emb_size):
+    def __init__(self, n_concepts, n_classes, emb_size, config: Config):
         super(ConceptReasonerModule, self).__init__()
         self.emb_size = emb_size
         self.n_classes = n_classes
         self.n_concepts = n_concepts
         self.concept_reasoner = ConceptReasoningLayer(
-            emb_size=emb_size, n_classes=n_classes
+            emb_size=emb_size,
+            n_classes=n_classes,
+            temperature=config.concept_temperature,
         )
         self.concept_context_generator = torch.nn.Sequential(
-                torch.nn.Linear(self.n_concepts, 2 * emb_size * self.n_concepts),
-                torch.nn.LeakyReLU(),
-            )
+            torch.nn.Linear(self.n_concepts, 2 * emb_size * self.n_concepts),
+            torch.nn.LeakyReLU(),
+        )
 
     def forward(self, combined, return_explanation=False, concept_names=None):
         concept_embs = self.concept_context_generator(combined)
         concept_embs_shape = combined.shape[:-1] + (self.n_concepts, 2 * self.emb_size)
         concept_embs = concept_embs.view(*concept_embs_shape)
-        concept_pos = concept_embs[..., :self.emb_size]
-        concept_neg = concept_embs[..., self.emb_size:]
-        embedding = concept_pos * combined[..., None] + concept_neg * (1 - combined[..., None])
+        concept_pos = concept_embs[..., : self.emb_size]
+        concept_neg = concept_embs[..., self.emb_size :]
+        embedding = concept_pos * combined[..., None] + concept_neg * (
+            1 - combined[..., None]
+        )
 
         x = self.concept_reasoner(embedding, combined)
 
@@ -258,10 +276,12 @@ class ConceptReasonerModule(torch.nn.Module):
 
 
 class GlobalConceptReasonerModule(torch.nn.Module):
-    def __init__(self, n_concepts, n_classes):
+    def __init__(self, n_concepts, n_classes, config: Config):
         super(GlobalConceptReasonerModule, self).__init__()
         self.n_classes = n_classes
-        self.concept_reasoner = GlobalConceptReasoningLayer(n_concepts, n_classes)
+        self.concept_reasoner = GlobalConceptReasoningLayer(
+            n_concepts, n_classes, temperature=config.concept_temperature
+        )
 
     def forward(self, combined, return_explanation=False, concept_names=None):
         x = self.concept_reasoner(combined)
@@ -284,7 +304,6 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         config: Config,
         index=0,
         a=10,
-        embedding_size=16,
     ):
         super().__init__(aggr="add")
         self.__name__ = "stone-age-" + str(index)
@@ -292,20 +311,23 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         self.register_buffer("_Y_range", torch.arange(bounding_parameter).float())
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.embedding_size = embedding_size
+        self.embedding_size = config.concept_embedding_size
         self.n_concepts = in_channels + in_channels * bounding_parameter
         self.a = a
         self.index = index
+        self.config = config
         if config.layer_type == LayerType.BronzeAgeConcept:
             self.reasoning_module = ConceptReasonerModule(
                 n_concepts=in_channels + in_channels * bounding_parameter,
-                emb_size=embedding_size,
+                emb_size=config.concept_embedding_size,
                 n_classes=out_channels,
+                config=config,
             )
         elif config.layer_type == LayerType.BronzeAgeGeneralConcept:
             self.reasoning_module = GlobalConceptReasonerModule(
                 n_concepts=in_channels + in_channels * bounding_parameter,
                 n_classes=out_channels,
+                config=config,
             )
         else:
             raise ValueError(f"Invalid layer type {config.layer_type}")
@@ -349,11 +371,19 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         else:
             x = self.reasoning_module(combined)
 
-        # if random.random() < 0.05:
-        #     print(x[0])
+        one_hot = differentiable_argmax(x)
+
         if return_entropy:
-            return x, torch.sum((x * (1 - x)) ** 2)
-        return x
+            entropy = torch.sum((x - one_hot) ** 2)
+            if self.config.use_one_hot_output:
+                return one_hot, entropy
+            else:
+                return x, entropy
+
+        if self.config.use_one_hot_output:
+            return one_hot
+        else:
+            return x
 
 
 class BronzeAgeGNNLayer(MessagePassing):
@@ -426,7 +456,10 @@ class StoneAgeGNN(torch.nn.Module):
             self.input = InputLayer(in_channels, state_size, config)
         else:
             self.input = ConceptReasonerModule(
-                n_concepts=in_channels, emb_size=input_emb_size, n_classes=state_size
+                n_concepts=in_channels,
+                emb_size=input_emb_size,
+                n_classes=state_size,
+                config=config,
             )
 
         if self.skip_connection:

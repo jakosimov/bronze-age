@@ -101,10 +101,11 @@ class LightningModel(lightning.LightningModule):
             y = y[batch.train_mask]
         entropy_loss = torch.sum(entropy) / y.size(0)
         loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
-        # print("loss", loss)
-        # print("entropy_loss", entropy_loss)
-        final_loss = loss + 0.1 * entropy_loss
+        final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
+        self.log("train_entropy_loss", entropy_loss, batch_size=batch.y.size(0))
+        self.log("train_error_loss", loss, batch_size=batch.y.size(0))
         self.log("train_loss", final_loss, batch_size=batch.y.size(0))
+        # print("final_loss", final_loss)
 
         self.train_accuracy(y_hat, y)
         self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True)
@@ -132,78 +133,6 @@ class LightningModel(lightning.LightningModule):
         y_hat = self.model(
             x=batch.x, edge_index=batch.edge_index, batch=batch.batch, explain=True
         )
-        # NLL loss
-        y = batch.y
-        if self.config.dataset.uses_mask:
-            y_hat = y_hat[batch.test_mask]
-            y = y[batch.test_mask]
-        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
-        self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
-
-        self.val_accuracy(y_hat, y)
-        self.log("test_acc", self.val_accuracy, on_step=False, on_epoch=True)
-        return loss
-
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
-
-
-class LightningWrapper(lightning.LightningModule):
-    def __init__(
-        self,
-        model,
-        num_classes: int,
-        config: Config,
-        class_weights=None,
-    ):
-        super().__init__()
-        self.save_hyperparameters()
-        self.config = config
-        self.model = model
-        self.class_weights = class_weights
-        self.train_accuracy = Accuracy(
-            task="multiclass", num_classes=num_classes, average="micro"
-        )
-        self.val_accuracy = Accuracy(
-            task="multiclass", num_classes=num_classes, average="micro"
-        )
-        self.test_accuracy = Accuracy(
-            task="multiclass", num_classes=num_classes, average="micro"
-        )
-
-    def forward(self, x):
-        return self.model(x)
-
-    def training_step(self, batch, batch_idx):
-        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
-
-        y = batch.y
-        if self.config.dataset.uses_mask:
-            y_hat = y_hat[batch.train_mask]
-            y = y[batch.train_mask]
-        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
-        self.log("train_loss", loss, batch_size=batch.y.size(0))
-
-        self.train_accuracy(y_hat, y)
-        self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
-        # NLL loss
-        y = batch.y
-        if self.config.dataset.uses_mask:
-            y_hat = y_hat[batch.val_mask]
-            y = y[batch.val_mask]
-        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
-        self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
-
-        self.val_accuracy(y_hat, y)
-        self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True)
-        return loss
-
-    def test_step(self, batch, batch_idx):
-        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
         # NLL loss
         y = batch.y
         if self.config.dataset.uses_mask:
@@ -411,6 +340,10 @@ def get_config_for_dataset(dataset, **kwargs):
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
         "layer_type": LayerType.BronzeAgeConcept,
+        "use_one_hot_output": False,
+        "concept_embedding_size": 16,
+        "concept_temperature": 0.5,
+        "entropy_loss_scaling": 0.1,
     }
     config.update(kwargs)
     return Config(**config)
