@@ -440,6 +440,7 @@ class StoneAgeGNN(torch.nn.Module):
 
         self.use_pooling = config.dataset.uses_pooling
         self.skip_connection = config.skip_connection
+        self.config = config
         state_size = config.state_size
         num_layers = config.num_layers
         bounding_parameter = config.bounding_parameter
@@ -496,14 +497,17 @@ class StoneAgeGNN(torch.nn.Module):
 
     def forward(self, x, edge_index, batch=None, explain=False, return_entropy=False):
         x = self.input(x.float())
+
+        x_one_hot = differentiable_argmax(x)
+        if self.config.use_one_hot_output:
+            x = x_one_hot
+
         xs = [x]
-        entropy = 0
+        entropy = torch.sum((x - x_one_hot) ** 2)
+
         for layer in self.stone_age:
-            if return_entropy:
-                x, ent = layer(x, edge_index, explain=explain, return_entropy=True)
-                entropy += ent
-            else:
-                x = layer(x, edge_index, explain=explain)
+            x, ent = layer(x, edge_index, explain=explain, return_entropy=True)
+            entropy += ent
             xs.append(x)
 
         if self.use_pooling:
