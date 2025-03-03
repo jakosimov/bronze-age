@@ -190,7 +190,8 @@ def train(config: Config):
     test_accuracies = []
     test_accuracies_dt = []
 
-    start_time = pd.Timestamp.now().strftime("%y/%m/%d %H:%M")
+    start_time = pd.Timestamp.now().strftime("%d/%m/%y %H:%M")
+    experiment_title = f"{start_time} {config.dataset}"
 
     split = CrossValidationSplit(config, dataset, random_state=42)
     for i, (train_dataset, val_dataset, test_dataset) in enumerate(split):
@@ -225,7 +226,7 @@ def train(config: Config):
         )
 
         logger = pl_loggers.TensorBoardLogger(
-            save_dir="lightning_logs", name=f"{start_time}"
+            save_dir="lightning_logs", name=experiment_title
         )
 
         trainer = lightning.Trainer(

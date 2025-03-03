@@ -454,25 +454,26 @@ class StoneAgeGNN(torch.nn.Module):
         )
 
         if self.is_interpretable:
-            self.input = InputLayer(in_channels, state_size, config)
-        else:
             self.input = ConceptReasonerModule(
                 n_concepts=in_channels,
                 emb_size=input_emb_size,
                 n_classes=state_size,
                 config=config,
             )
+        else:
+            self.input = InputLayer(in_channels, state_size, config)
 
         if self.skip_connection:
             final_layer_inputs = (num_layers + 1) * state_size
         else:
             final_layer_inputs = state_size
 
-        if False:  # This gives awful results
+        if self.is_interpretable:  # This gives awful results
             self.output = ConceptReasonerModule(
                 n_concepts=final_layer_inputs,
                 n_classes=out_channels,
                 emb_size=output_emb_size,
+                config=config,
             )
         else:
             self.output = PoolingLayer(final_layer_inputs, out_channels, config=config)
@@ -496,7 +497,13 @@ class StoneAgeGNN(torch.nn.Module):
             )
 
     def forward(self, x, edge_index, batch=None, explain=False, return_entropy=False):
-        x = self.input(x.float())
+        if explain:
+            x, explanation = self.input(x.float(), return_explanation=True)
+            print()
+            print("input")
+            print(explanation)
+        else:
+            x = self.input(x.float())
 
         x_one_hot = differentiable_argmax(x)
         if self.config.use_one_hot_output:
@@ -515,9 +522,21 @@ class StoneAgeGNN(torch.nn.Module):
             xs = [global_add_pool(xi, batch) for xi in xs]
         if self.skip_connection:
             x = torch.cat(xs, dim=1)
-        x = self.output(x)
+
+        if explain:
+            x, explanation = self.output(x, return_explanation=True)
+            print("output")
+            print(explanation)
+            print()
+        else:
+            x = self.output(x)
+
+        if self.config.use_one_hot_output:
+            x = differentiable_argmax(x)
+
         if return_entropy:
             return x, entropy
+
         return x
 
     def explain(self, x, edge_index, batch=None):
