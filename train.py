@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 import torchmetrics
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch import loggers as pl_loggers
 from sklearn.model_selection import ShuffleSplit, StratifiedKFold
 from sklearn.utils.class_weight import compute_class_weight
 from torch_geometric.loader import DataLoader
@@ -189,6 +190,8 @@ def train(config: Config):
     test_accuracies = []
     test_accuracies_dt = []
 
+    start_time = pd.Timestamp.now().strftime("%y/%m/%d %H:%M")
+
     split = CrossValidationSplit(config, dataset, random_state=42)
     for i, (train_dataset, val_dataset, test_dataset) in enumerate(split):
         train_loader = DataLoader(
@@ -221,6 +224,10 @@ def train(config: Config):
             class_weights=class_weights,
         )
 
+        logger = pl_loggers.TensorBoardLogger(
+            save_dir="lightning_logs", name=f"{start_time}"
+        )
+
         trainer = lightning.Trainer(
             max_epochs=config.max_epochs,
             log_every_n_steps=1,
@@ -228,6 +235,7 @@ def train(config: Config):
             callbacks=[early_stopping, checkpoint_callback],
             enable_model_summary=False,
             enable_progress_bar=False,
+            logger=logger,
         )
         trainer.fit(model, train_loader, val_dataloaders=val_loader)
 
