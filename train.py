@@ -119,11 +119,14 @@ class LightningModel(lightning.LightningModule):
         return final_loss
 
     def validation_step(self, batch, batch_idx):
+        use_one_hot_output = self.config.use_one_hot_output
+        self.config.use_one_hot_output = True
         y_hat = self.model(
             x=batch.x,
             edge_index=batch.edge_index,
             batch=batch.batch,
         )
+        self.config.use_one_hot_output = use_one_hot_output
         # NLL loss
         y = batch.y
         if self.config.dataset.uses_mask:
@@ -139,9 +142,13 @@ class LightningModel(lightning.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
+        use_one_hot_output = self.config.use_one_hot_output
+        self.config.use_one_hot_output = True
+        
         y_hat, explanations = self.model(
             x=batch.x, edge_index=batch.edge_index, batch=batch.batch, return_explanation=True
         )
+        self.config.use_one_hot_output = use_one_hot_output
         explanation_path = Path(self.loggers[0].log_dir) / "explanations.txt"
         explanation_path.write_text(str(explanations))
         # NLL loss
