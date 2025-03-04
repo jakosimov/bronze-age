@@ -1,5 +1,6 @@
 import logging
 import warnings
+from pathlib import Path
 
 import lightning
 import numpy as np
@@ -7,8 +8,8 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import torchmetrics
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch import loggers as pl_loggers
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from sklearn.model_selection import ShuffleSplit, StratifiedKFold
 from sklearn.utils.class_weight import compute_class_weight
 from torch_geometric.loader import DataLoader
@@ -89,7 +90,7 @@ class LightningModel(lightning.LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        y_hat, entropy = self.model(
+        y_hat, entropies = self.model(
             x=batch.x,
             edge_index=batch.edge_index,
             batch=batch.batch,
@@ -100,8 +101,13 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.train_mask]
             y = y[batch.train_mask]
-        entropy_loss = torch.sum(entropy) / y.size(0)
-        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
+        entropies = {f"train_entropy_loss_{layer}": torch.sum(entropy) / y.size(0) for layer, entropy in entropies.items()}
+        for key, value in entropies.items():
+            self.log(key, value, on_step=False, on_epoch=True, batch_size=batch.y.size(0))
+        entropy_loss = torch.stack(list(entropies.values())).sum()
+        y_one_hot = F.one_hot(y.long(), num_classes=y_hat.shape[-1]).float()
+        loss = F.binary_cross_entropy(y_hat, y_one_hot, weight=self.class_weights)
+        #loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
         final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
         self.log("train_entropy_loss", entropy_loss, batch_size=batch.y.size(0))
         self.log("train_error_loss", loss, batch_size=batch.y.size(0))
@@ -123,7 +129,9 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.val_mask]
             y = y[batch.val_mask]
-        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
+        y_one_hot = F.one_hot(y.long(), num_classes=y_hat.shape[-1]).float()
+        loss = F.binary_cross_entropy(y_hat, y_one_hot, weight=self.class_weights)
+        #loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
         self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -131,15 +139,19 @@ class LightningModel(lightning.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        y_hat = self.model(
-            x=batch.x, edge_index=batch.edge_index, batch=batch.batch, explain=True
+        y_hat, explanations = self.model(
+            x=batch.x, edge_index=batch.edge_index, batch=batch.batch, return_explanation=True
         )
+        explanation_path = Path(self.loggers[0].log_dir) / "explanations.txt"
+        explanation_path.write_text(str(explanations))
         # NLL loss
         y = batch.y
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.test_mask]
             y = y[batch.test_mask]
-        loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
+        y_one_hot = F.one_hot(y.long(), num_classes=y_hat.shape[-1]).float()
+        loss = F.binary_cross_entropy(y_hat, y_one_hot, weight=self.class_weights)
+        #loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
         self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -337,7 +349,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "alpha": 1.0,
         "beta": 1.0,
         "dropout": 0.0,
-        "use_batch_norm": True,
+        "use_batch_norm": False,
         "network": NetworkType.MLP,
         "hidden_units": 16,
         "skip_connection": False,
@@ -353,7 +365,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "use_one_hot_output": False,
         "concept_embedding_size": 16,
         "concept_temperature": 0.5,
-        "entropy_loss_scaling": 0.1,
+        "entropy_loss_scaling": 0.2,
         "early_stopping": False,
     }
     config.update(kwargs)
