@@ -347,7 +347,9 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         clamped_sum = torch.clamp(message_sums, min=0, max=self.bounding_parameter)
         states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
         states = F.sigmoid(self.a * states)
-        return states.view(*states.shape[:-2], -1)
+        states = states.view(*states.shape[:-2], -1)
+        #states = states + states.detach().round().float() - states.detach()
+        return states
 
     def update(self, inputs, x, return_explanation=False, return_entropy=False):
         # inputs is one hot encoding of current state

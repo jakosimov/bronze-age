@@ -15,7 +15,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from torch_geometric.loader import DataLoader
 from torchmetrics.classification import Accuracy
 
-from bronze_age.config import Config, LayerType, NetworkType
+from bronze_age.config import Config, LayerType, LossMode, NetworkType
 from bronze_age.datasets import DatasetEnum, get_dataset
 from bronze_age.datasets.cross_validation import CrossValidationSplit
 from bronze_age.models.decision_tree import train_decision_tree_model
@@ -63,6 +63,13 @@ def get_class_weights(
     return class_weights
 
 
+def _binary_cross_entropy_loss(y_hat, y, class_weights):
+    y_one_hot = F.one_hot(y.long(), num_classes=y_hat.shape[-1]).float()
+    return F.binary_cross_entropy(y_hat, y_one_hot, weight=class_weights)
+
+def _cross_entropy_loss(y_hat, y, class_weights):
+    return F.cross_entropy(y_hat, y, weight=class_weights)
+
 class LightningModel(lightning.LightningModule):
     def __init__(
         self,
@@ -105,9 +112,7 @@ class LightningModel(lightning.LightningModule):
         for key, value in entropies.items():
             self.log(key, value, on_step=False, on_epoch=True, batch_size=batch.y.size(0))
         entropy_loss = torch.stack(list(entropies.values())).sum()
-        y_one_hot = F.one_hot(y.long(), num_classes=y_hat.shape[-1]).float()
-        loss = F.binary_cross_entropy(y_hat, y_one_hot, weight=self.class_weights)
-        #loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
+        loss = _binary_cross_entropy_loss(y_hat, y, self.class_weights) if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY else _cross_entropy_loss(y_hat, y, self.class_weights)
         final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
         self.log("train_entropy_loss", entropy_loss, batch_size=batch.y.size(0))
         self.log("train_error_loss", loss, batch_size=batch.y.size(0))
@@ -132,9 +137,7 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.val_mask]
             y = y[batch.val_mask]
-        y_one_hot = F.one_hot(y.long(), num_classes=y_hat.shape[-1]).float()
-        loss = F.binary_cross_entropy(y_hat, y_one_hot, weight=self.class_weights)
-        #loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
+        loss = _binary_cross_entropy_loss(y_hat, y, self.class_weights) if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY else _cross_entropy_loss(y_hat, y, self.class_weights)
         self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -156,9 +159,7 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.test_mask]
             y = y[batch.test_mask]
-        y_one_hot = F.one_hot(y.long(), num_classes=y_hat.shape[-1]).float()
-        loss = F.binary_cross_entropy(y_hat, y_one_hot, weight=self.class_weights)
-        #loss = F.cross_entropy(y_hat, y, weight=self.class_weights)
+        loss = _binary_cross_entropy_loss(y_hat, y, self.class_weights) if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY else _cross_entropy_loss(y_hat, y, self.class_weights)
         self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -362,7 +363,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "skip_connection": False,
         "bounding_parameter": 10,
         "batch_size": 128,
-        "learning_rate": 0.01,
+        "learning_rate": 0.05,
         "max_epochs": 1500,
         "num_cv": 10,
         "dataset": dataset,
@@ -370,10 +371,11 @@ def get_config_for_dataset(dataset, **kwargs):
         "state_size": NUM_STATES[dataset],
         "layer_type": LayerType.BronzeAgeConcept,
         "use_one_hot_output": False,
-        "concept_embedding_size": 16,
+        "concept_embedding_size": 128,
         "concept_temperature": 0.5,
         "entropy_loss_scaling": 0.2,
         "early_stopping": False,
+        "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
     }
     config.update(kwargs)
     return Config(**config)

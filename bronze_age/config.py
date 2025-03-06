@@ -16,6 +16,9 @@ class LayerType(StrEnum):
     BronzeAgeConcept = "bronze-age-concept"
     BronzeAgeGeneralConcept = "bronze-age-general-concept"
 
+class LossMode(StrEnum):
+    BINARY_CROSS_ENTROPY = "binary_cross_entropy"
+    CROSS_ENTROPY = "cross_entropy"
 
 @dataclass
 class Config:
@@ -45,3 +48,4 @@ class Config:
     concept_temperature: float = 0.5
     entropy_loss_scaling: float = 0.2
     early_stopping: bool = True
+    loss_mode: LossMode = LossMode.BINARY_CROSS_ENTROPY
