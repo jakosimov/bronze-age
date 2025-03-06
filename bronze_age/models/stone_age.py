@@ -348,7 +348,8 @@ class BronzeAgeGNNLayerConceptReasoner(MessagePassing):
         states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
         states = F.sigmoid(self.a * states)
         states = states.view(*states.shape[:-2], -1)
-        #states = states + states.detach().round().float() - states.detach()
+        if self.config.use_one_hot_output:
+            states = states + states.detach().round().float() - states.detach()
         return states
 
     def update(self, inputs, x, return_explanation=False, return_entropy=False):
