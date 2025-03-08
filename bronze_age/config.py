@@ -52,3 +52,44 @@ class Config:
     early_stopping: bool = True
     loss_mode: LossMode = LossMode.BINARY_CROSS_ENTROPY
     one_hot_evaluation: bool = True
+
+
+class LayerTypeBronze(StrEnum):
+    LINEAR = "linear"
+    MLP = "mlp"
+    DEEP_CONCEPT_REASONER = "deep-concept-reasoner"
+    GLOBAL_DEEP_CONCEPT_REASONER = "global-deep-concept-reasoner"
+
+
+class AggregationMode(StrEnum):
+    STONE_AGE = "stone_age"
+    BRONZE_AGE = "bronze_age"
+class BronzeConfig:
+    dataset: DatasetEnum
+    data_dir: Path
+    temperature: float = 1.0
+    alpha: float = 1.0
+    beta: float = 1.0
+    dropout: float = 0.0
+    use_batch_norm: float = True
+    hidden_units: int = 16
+    state_size: int = 10
+    num_layers: int = 5
+    skip_connection: bool = True
+    bounding_parameter: int = 10
+    batch_size: int = 128
+    device: str = "mps"
+    max_leaf_nodes: int = 100
+    learning_rate: float = 0.01
+    max_epochs: int = 1500
+    num_cv: int = 10
+    train_decision_tree: bool = False
+    layer_type: LayerType = LayerType.MLP
+    use_one_hot_output: bool = False
+    concept_embedding_size: int = 16
+    concept_temperature: float = 0.5
+    entropy_loss_scaling: float = 0.2
+    early_stopping: bool = True
+    loss_mode: LossMode = LossMode.BINARY_CROSS_ENTROPY
+    aggregation_mode: AggregationMode = AggregationMode.BRONZE_AGE
+    one_hot_evaluation: bool = True
