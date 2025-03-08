@@ -67,8 +67,10 @@ def _binary_cross_entropy_loss(y_hat, y, class_weights):
     y_one_hot = F.one_hot(y.long(), num_classes=y_hat.shape[-1]).float()
     return F.binary_cross_entropy(y_hat, y_one_hot, weight=class_weights)
 
+
 def _cross_entropy_loss(y_hat, y, class_weights):
     return F.cross_entropy(y_hat, y, weight=class_weights)
+
 
 class LightningModel(lightning.LightningModule):
     def __init__(
@@ -108,11 +110,20 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.train_mask]
             y = y[batch.train_mask]
-        entropies = {f"train_entropy_loss_{layer}": torch.sum(entropy) / y.size(0) for layer, entropy in entropies.items()}
+        entropies = {
+            f"train_entropy_loss_{layer}": torch.sum(entropy) / y.size(0)
+            for layer, entropy in entropies.items()
+        }
         for key, value in entropies.items():
-            self.log(key, value, on_step=False, on_epoch=True, batch_size=batch.y.size(0))
+            self.log(
+                key, value, on_step=False, on_epoch=True, batch_size=batch.y.size(0)
+            )
         entropy_loss = torch.stack(list(entropies.values())).sum()
-        loss = _binary_cross_entropy_loss(y_hat, y, self.class_weights) if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY else _cross_entropy_loss(y_hat, y, self.class_weights)
+        loss = (
+            _binary_cross_entropy_loss(y_hat, y, self.class_weights)
+            if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
+            else _cross_entropy_loss(y_hat, y, self.class_weights)
+        )
         final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
         self.log("train_entropy_loss", entropy_loss, batch_size=batch.y.size(0))
         self.log("train_error_loss", loss, batch_size=batch.y.size(0))
@@ -125,7 +136,8 @@ class LightningModel(lightning.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         use_one_hot_output = self.config.use_one_hot_output
-        self.config.use_one_hot_output = True
+        if self.config.one_hot_evaluation:
+            self.config.use_one_hot_output = True
         y_hat = self.model(
             x=batch.x,
             edge_index=batch.edge_index,
@@ -137,7 +149,11 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.val_mask]
             y = y[batch.val_mask]
-        loss = _binary_cross_entropy_loss(y_hat, y, self.class_weights) if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY else _cross_entropy_loss(y_hat, y, self.class_weights)
+        loss = (
+            _binary_cross_entropy_loss(y_hat, y, self.class_weights)
+            if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
+            else _cross_entropy_loss(y_hat, y, self.class_weights)
+        )
         self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -146,10 +162,15 @@ class LightningModel(lightning.LightningModule):
 
     def test_step(self, batch, batch_idx):
         use_one_hot_output = self.config.use_one_hot_output
-        self.config.use_one_hot_output = True
-        
+
+        if self.config.one_hot_evaluation:
+            self.config.use_one_hot_output = True
+
         y_hat, explanations = self.model(
-            x=batch.x, edge_index=batch.edge_index, batch=batch.batch, return_explanation=True
+            x=batch.x,
+            edge_index=batch.edge_index,
+            batch=batch.batch,
+            return_explanation=True,
         )
         self.config.use_one_hot_output = use_one_hot_output
         explanation_path = Path(self.loggers[0].log_dir) / "explanations.txt"
@@ -159,7 +180,11 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.test_mask]
             y = y[batch.test_mask]
-        loss = _binary_cross_entropy_loss(y_hat, y, self.class_weights) if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY else _cross_entropy_loss(y_hat, y, self.class_weights)
+        loss = (
+            _binary_cross_entropy_loss(y_hat, y, self.class_weights)
+            if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
+            else _cross_entropy_loss(y_hat, y, self.class_weights)
+        )
         self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
@@ -374,8 +399,9 @@ def get_config_for_dataset(dataset, **kwargs):
         "concept_embedding_size": 128,
         "concept_temperature": 0.5,
         "entropy_loss_scaling": 0.2,
-        "early_stopping": False,
+        "early_stopping": True,
         "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
+        "one_hot_evaluation": False,
     }
     config.update(kwargs)
     return Config(**config)
