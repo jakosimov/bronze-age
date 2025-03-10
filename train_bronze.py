@@ -15,11 +15,15 @@ from sklearn.utils.class_weight import compute_class_weight
 from torch_geometric.loader import DataLoader
 from torchmetrics.classification import Accuracy
 
-from bronze_age.config import Config, LayerType, LossMode, NetworkType
+from bronze_age.config import AggregationMode
+from bronze_age.config import BronzeConfig as Config
+from bronze_age.config import DatasetEnum
+from bronze_age.config import LayerTypeBronze as LayerType
+from bronze_age.config import LossMode, NetworkType, NonLinearity
 from bronze_age.datasets import DatasetEnum, get_dataset
 from bronze_age.datasets.cross_validation import CrossValidationSplit
+from bronze_age.models.bronze_age import BronzeAgeGNN
 from bronze_age.models.decision_tree import train_decision_tree_model
-from bronze_age.models.stone_age import StoneAgeGNN as BronzeAgeGNN
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 warnings.filterwarnings("ignore", ".*GPU available but not used.*")
@@ -99,11 +103,10 @@ class LightningModel(lightning.LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        y_hat, entropies = self.model(
+        y_hat, entropies, _ = self.model(
             x=batch.x,
             edge_index=batch.edge_index,
             batch=batch.batch,
-            return_entropy=True,
         )
 
         y = batch.y
@@ -135,15 +138,11 @@ class LightningModel(lightning.LightningModule):
         return final_loss
 
     def validation_step(self, batch, batch_idx):
-        use_one_hot_output = self.config.use_one_hot_output
-        if self.config.one_hot_evaluation:
-            self.config.use_one_hot_output = True
-        y_hat = self.model(
+        y_hat, _, _ = self.model(
             x=batch.x,
             edge_index=batch.edge_index,
             batch=batch.batch,
         )
-        self.config.use_one_hot_output = use_one_hot_output
         # NLL loss
         y = batch.y
         if self.config.dataset.uses_mask:
@@ -161,18 +160,12 @@ class LightningModel(lightning.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        use_one_hot_output = self.config.use_one_hot_output
-
-        if self.config.one_hot_evaluation:
-            self.config.use_one_hot_output = True
-
-        y_hat, explanations = self.model(
+        y_hat, _, explanations = self.model(
             x=batch.x,
             edge_index=batch.edge_index,
             batch=batch.batch,
             return_explanation=True,
         )
-        self.config.use_one_hot_output = use_one_hot_output
         explanation_path = Path(self.loggers[0].log_dir) / "explanations.txt"
         explanation_path.write_text(str(explanations))
         # NLL loss
@@ -270,6 +263,8 @@ def train(config: Config):
             class_weights=class_weights,
         )
 
+        model = torch.compile(model)
+        
         logger = pl_loggers.TensorBoardLogger(
             save_dir="lightning_logs", name=experiment_title
         )
@@ -379,14 +374,11 @@ def get_config_for_dataset(dataset, **kwargs):
     config = {
         "data_dir": "downloads",
         "temperature": 1.0,
-        "alpha": 1.0,
-        "beta": 1.0,
         "dropout": 0.0,
-        "use_batch_norm": False,
-        "network": NetworkType.MLP,
+        "use_batch_norm": True,
         "hidden_units": 16,
         "skip_connection": True,
-        "bounding_parameter": 10,
+        "bounding_parameter": 1000,
         "batch_size": 128,
         "learning_rate": 0.01,
         "max_epochs": 1500,
@@ -394,14 +386,13 @@ def get_config_for_dataset(dataset, **kwargs):
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.StoneAge,
-        "use_one_hot_output": False,
+        "layer_type": LayerType.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
         "concept_embedding_size": 128,
         "concept_temperature": 0.5,
-        "entropy_loss_scaling": 0.2,
+        "entropy_loss_scaling": 0,
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
-        "one_hot_evaluation": False,
     }
     config.update(kwargs)
     return Config(**config)
@@ -449,7 +440,7 @@ if __name__ == "__main__":
         DatasetEnum.REDDIT_BINARY,
         DatasetEnum.COLLAB,
     ]
-    #datasets = [DatasetEnum.SIMPLE_SATURATION]
+    #datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
 
     for dataset in datasets:
         for dataset_, (

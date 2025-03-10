@@ -6,7 +6,11 @@ from torch_geometric.nn import MessagePassing, global_add_pool
 from bronze_age.config import AggregationMode
 from bronze_age.config import BronzeConfig as Config
 from bronze_age.config import LayerTypeBronze as LayerType
-from bronze_age.models.stone_age import ConceptReasonerModule, InputLayer
+from bronze_age.config import NonLinearity
+from bronze_age.models.concept_reasoner import (
+    ConceptReasonerModule,
+    GlobalConceptReasonerModule,
+)
 
 
 def differentiable_argmax(x):
@@ -62,7 +66,7 @@ class MLP(torch.nn.Module):
         for bn in self.bns:
             bn.reset_parameters()
 
-    def forward(self, x, explain=False):
+    def forward(self, x):
         for i, lin in enumerate(self.lins[:-1]):
             x = lin(x)
             x = self.bns[i](x)
@@ -74,7 +78,7 @@ class MLP(torch.nn.Module):
 
 
 class BronzeAgeLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, config: Config, name=None, non_linearity=None):
+    def __init__(self, in_channels, out_channels, config: Config, layer_type: LayerType = None, non_linearity=None, name=None):
         super().__init__()
         self.config = config
         self.name = name
@@ -84,51 +88,78 @@ class BronzeAgeLayer(nn.Module):
         if name is not None:
             self.__name__ = name
         
-        if config.layer_type == LayerType.LINEAR:
+        layer_type = layer_type or config.layer_type
+        if layer_type == LayerType.LINEAR:
             self.f = torch.nn.Linear(in_channels, out_channels)
-            self.non_linearity = GumbelSoftmax(config)
-        elif config.layer_type == LayerType.MLP:
+        elif layer_type == LayerType.MLP:
             self.f = MLP(in_channels, config.hidden_units, out_channels, 2, config.dropout)
-            self.non_linearity = GumbelSoftmax(config)
-        elif config.layer_type == LayerType.DEEP_CONCEPT_REASONER:
-            self.f = ConceptReasonerModule(in_channels, out_channels, config)
-            self.non_linearity = nn.Identity() if not self.config.use_one_hot_output else DifferentiableArgmax(config)
-        elif config.layer_type == LayerType.GLOBAL_DEEP_CONCEPT_REASONER:
-            raise NotImplementedError
+        elif layer_type == LayerType.DEEP_CONCEPT_REASONER:
+            self.f = ConceptReasonerModule(in_channels, out_channels, config.concept_embedding_size, config)
+        elif layer_type == LayerType.GLOBAL_DEEP_CONCEPT_REASONER:
+            self.f = GlobalConceptReasonerModule(in_channels, out_channels, config)
         else:
             raise NotImplementedError
 
+        if config.nonlinearity is None:
+            self.non_linearity = nn.Identity()
+        elif config.nonlinearity == NonLinearity.GUMBEL_SOFTMAX:
+            self.non_linearity = GumbelSoftmax(config)
+        elif config.nonlinearity == NonLinearity.DIFFERENTIABLE_ARGMAX:
+            self.non_linearity = DifferentiableArgmax(config)
+        else:
+            raise NotImplementedError
+        
+        if config.evaluation_nonlinearity is None:
+            self.eval_non_linearity = self.non_linearity
+        elif config.evaluation_nonlinearity == NonLinearity.GUMBEL_SOFTMAX:
+            self.eval_non_linearity = GumbelSoftmax(config)
+        elif config.evaluation_nonlinearity == NonLinearity.DIFFERENTIABLE_ARGMAX:
+            self.eval_non_linearity = DifferentiableArgmax(config)
+        else:
+            raise NotImplementedError
+        
         self.non_linearity = non_linearity or self.non_linearity
+        self.eval_non_linearity = non_linearity or self.eval_non_linearity
 
-    def forward(self, x):
-        x1 = self.f(x)
-        x2 = self.non_linearity(x1)
+    def forward(self, x, return_explanation=False):
+        if return_explanation:
+            x1, explanation = self.f(x, return_explanation=True)
+        else:
+            x1, explanation = self.f(x), None
+            
+        x2 = self.non_linearity(x1) if self.training else self.eval_non_linearity(x1)
 
         entropy_loss = nn.functional.mse_loss(x2, x1, reduction="mean")
-        return x2, entropy_loss
+
+        
+            
+        return x2, entropy_loss, explanation
     
 
 class BronzeAgeGNNLayer(MessagePassing):
-    def __init__(self, in_channels, out_channels, config: Config):
+    def __init__(self, in_channels, out_channels, config: Config, name=None):
         super(BronzeAgeGNNLayer, self).__init__(aggr="add")
         self.config = config
         self.in_channels = in_channels
         self.out_channels = out_channels
-
+        self.a = config.a
+        bounding_parameter = config.bounding_parameter
+        self.bounding_parameter = bounding_parameter
         if config.aggregation_mode == AggregationMode.STONE_AGE:
-            self.layer = BronzeAgeLayer(in_channels, 2*out_channels, config)
+            self.layer = BronzeAgeLayer(2*in_channels, out_channels, config)
         elif config.aggregation_mode == AggregationMode.BRONZE_AGE:
             bounding_parameter = config.bounding_parameter
-            out_channels = out_channels * (bounding_parameter + 1)
-            self.bounding_parameter = bounding_parameter
             self.register_buffer("_Y_range", torch.arange(bounding_parameter).float())
         
-            self.layer = BronzeAgeLayer(in_channels, out_channels, config)
+            self.layer = BronzeAgeLayer(in_channels * (bounding_parameter + 1), out_channels, config)
         else:
             raise NotImplementedError
+        
+        if name is not None:
+            self.__name__ = name
 
-    def forward(self, x, edge_index):
-        return self.propagate(edge_index, x=x)
+    def forward(self, x, edge_index, return_explanation=False):
+        return self.propagate(edge_index, x=x, return_explanation=return_explanation)
 
     def message(self, x_j):
         return x_j
@@ -138,27 +169,21 @@ class BronzeAgeGNNLayer(MessagePassing):
         clamped_sum = torch.clamp(message_sums, min=0, max=self.bounding_parameter)
         if self.config.aggregation_mode == AggregationMode.STONE_AGE:
             return clamped_sum
-        elif self.config.aggregation_mode == AggregationMode.BRONZE_AGE:
+        elif self.config.aggregation_mode in [AggregationMode.BRONZE_AGE, AggregationMode.BRONZE_AGE_ROUNDED]:
             states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
             states = F.sigmoid(self.a * states)
             states = states.view(*states.shape[:-2], -1)
-            if self.config.use_one_hot_output:
+            if self.config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
                 states = states + states.detach().round().float() - states.detach()
             return states
         else:
             raise NotImplementedError
 
-    def update(self, inputs, x):
-        combined = torch.cat((inputs, x), 1)
-        return self.layer(combined)
+    def update(self, inputs, x, return_explanation=False):
+        combined = torch.cat((x, inputs), 1)
+        return self.layer(combined, return_explanation=return_explanation)
      
     
-LOGIC_LAYERS = {
-    LayerType.DEEP_CONCEPT_REASONER: ConceptReasonerModule,
-    LayerType.GLOBAL_DEEP_CONCEPT_REASONER: None, # TODO
-    LayerType.LINEAR: InputLayer,
-    LayerType.MLP: InputLayer,
-}
 class BronzeAgeGNN(torch.nn.Module):
 
     def __init__(self, in_channels, out_channels, config: Config):
@@ -171,28 +196,26 @@ class BronzeAgeGNN(torch.nn.Module):
         
         state_size = config.state_size
         num_layers = config.num_layers
-        bounding_parameter = config.bounding_parameter
 
-        input_emb_size = 16
-        output_emb_size = 32
-
-        self.input = BronzeAgeLayer(in_channels, input_emb_size, config, name="InputLayer")
+        self.input = BronzeAgeLayer(in_channels, state_size, config, layer_type=LayerType.LINEAR if config.layer_type == LayerType.MLP else config.layer_type, name="InputLayer")
 
         final_layer_inputs = (num_layers + 1) * state_size if self.skip_connection else state_size
         final_non_linearity = nn.LogSoftmax(dim=-1) if config.layer_type in [LayerType.LINEAR, LayerType.MLP] else None
-        self.output = BronzeAgeLayer(final_layer_inputs, out_channels, config, name="PoolingLayer", non_linearity=final_non_linearity)
+        self.output = BronzeAgeLayer(final_layer_inputs, out_channels, config, non_linearity=final_non_linearity, name="PoolingLayer",)
 
         self.stone_age = nn.ModuleList()
         for i in range(num_layers):
             self.stone_age.append(BronzeAgeGNNLayer(state_size, state_size, config, name=f"StoneAgeLayer-{i}"))
     
-    def forward(self, x, edge_index, batch=None):
-        x, loss_term = self.input(x.float())
+    def forward(self, x, edge_index, batch=None, return_explanation=False):
+        x, loss_term, explanation = self.input(x.float())
         entropy = {"input": loss_term}
-
+        explanations = {"input": explanation}
+        xs = [x]
         for layer in self.stone_age:
-            x, loss_term = layer(x, edge_index)
+            x, loss_term, explanation = layer(x, edge_index)
             entropy[layer.__name__] = loss_term
+            explanations[layer.__name__] = explanation
             xs.append(x)
 
         if self.use_pooling:
@@ -201,6 +224,10 @@ class BronzeAgeGNN(torch.nn.Module):
         if self.skip_connection:
             x = torch.cat(xs, dim=1)
 
-        x, _ = self.output(x)
+        x, _, explanation = self.output(x)
+        explanations["output"] = explanation
 
-        return x, entropy
+        if not return_explanation:
+            explanations = None
+    
+        return x, entropy, explanations

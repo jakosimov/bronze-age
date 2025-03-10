@@ -3,6 +3,8 @@ from collections import Counter
 
 import torch
 
+from bronze_age.config import Config
+
 
 class Logic:
     @abc.abstractmethod
@@ -397,3 +399,69 @@ class GlobalConceptReasoningLayer(torch.nn.Module):
                     )
 
         return explanations
+
+
+def generate_names(n_concepts, in_channels, bounding_parameter):
+    names = [f"s_{i}" for i in range(n_concepts)] + [
+        f"s_{i}_count>{j}"
+        for i in range(in_channels)
+        for j in range(bounding_parameter)
+    ]
+    return names
+
+
+class ConceptReasonerModule(torch.nn.Module):
+    def __init__(self, n_concepts, n_classes, emb_size, config: Config):
+        super(ConceptReasonerModule, self).__init__()
+        self.emb_size = emb_size
+        self.n_classes = n_classes
+        self.n_concepts = n_concepts
+        self.concept_reasoner = ConceptReasoningLayer(
+            emb_size=emb_size,
+            n_classes=n_classes,
+            temperature=config.concept_temperature,
+        )
+        self.concept_context_generator = torch.nn.Sequential(
+            torch.nn.Linear(self.n_concepts, 2 * emb_size * self.n_concepts),
+            torch.nn.LeakyReLU(),
+        )
+
+    def forward(self, combined, return_explanation=False, concept_names=None):
+        concept_embs = self.concept_context_generator(combined)
+        concept_embs_shape = combined.shape[:-1] + (self.n_concepts, 2 * self.emb_size)
+        concept_embs = concept_embs.view(*concept_embs_shape)
+        concept_pos = concept_embs[..., : self.emb_size]
+        concept_neg = concept_embs[..., self.emb_size :]
+        embedding = concept_pos * combined[..., None] + concept_neg * (
+            1 - combined[..., None]
+        )
+
+        x = self.concept_reasoner(embedding, combined)
+
+        if return_explanation:
+            explanation = self.concept_reasoner.explain(
+                embedding, combined, mode="global", concept_names=concept_names
+            )
+            return x, explanation
+
+        return x
+
+
+class GlobalConceptReasonerModule(torch.nn.Module):
+    def __init__(self, n_concepts, n_classes, config: Config):
+        super(GlobalConceptReasonerModule, self).__init__()
+        self.n_classes = n_classes
+        self.concept_reasoner = GlobalConceptReasoningLayer(
+            n_concepts, n_classes, temperature=config.concept_temperature
+        )
+
+    def forward(self, combined, return_explanation=False, concept_names=None):
+        x = self.concept_reasoner(combined)
+
+        if return_explanation:
+            explanation = self.concept_reasoner.explain(
+                combined, mode="global", concept_names=concept_names
+            )
+            return x, explanation
+
+        return x
