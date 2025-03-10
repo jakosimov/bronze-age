@@ -10,6 +10,7 @@ from torch_geometric.data import Data
 from torch_geometric.datasets import Planetoid, TUDataset
 from torch_geometric.transforms import Compose
 
+from bronze_age.datasets.distance import Distance
 from bronze_age.datasets.infection import Infection
 from bronze_age.datasets.saturation import Saturation
 from bronze_age.datasets.simple_saturation import SimpleSaturation
@@ -90,6 +91,7 @@ class DatasetEnum(StrEnum):
     OGB_PPA = "OGB-ppa"
     OGB_CODE2 = "OGB-code2"
     SIMPLE_SATURATION = "Simple_Saturation"
+    DISTANCE = "Distance"
 
     @property
     def uses_pooling(self):
@@ -179,6 +181,7 @@ _DATASETS = {
     DatasetEnum.OGB_CODE2: lambda c: PygGraphPropPredDataset(
         "ogbg-code2", root=c.data_dir
     ),
+    DatasetEnum.DISTANCE: lambda c: CustomDataset([Distance().data for i in range(10)]),
 }
 
 _USES_POOLING = {
@@ -203,6 +206,7 @@ _USES_POOLING = {
     DatasetEnum.OGB_PPA: True,
     DatasetEnum.OGB_CODE2: True,
     DatasetEnum.SIMPLE_SATURATION: False,
+    DatasetEnum.DISTANCE: False,
 }
 
 _USES_MASK = {
@@ -227,6 +231,7 @@ _USES_MASK = {
     DatasetEnum.OGB_PPA: False,
     DatasetEnum.OGB_CODE2: False,
     DatasetEnum.SIMPLE_SATURATION: False,
+    DatasetEnum.DISTANCE: False,
 }
 
 

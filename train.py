@@ -358,6 +358,7 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.REDDIT_BINARY: 2,
         DatasetEnum.COLLAB: 3,
         DatasetEnum.SIMPLE_SATURATION: 1,
+        DatasetEnum.DISTANCE: 3,
     }
     NUM_STATES = {
         DatasetEnum.INFECTION: 6,
@@ -375,6 +376,7 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.REDDIT_BINARY: 5,
         DatasetEnum.COLLAB: 8,
         DatasetEnum.SIMPLE_SATURATION: 3,
+        DatasetEnum.DISTANCE: 4,
     }
     config = {
         "data_dir": "downloads",
@@ -449,7 +451,7 @@ if __name__ == "__main__":
         DatasetEnum.REDDIT_BINARY,
         DatasetEnum.COLLAB,
     ]
-    #datasets = [DatasetEnum.SIMPLE_SATURATION]
+    datasets = [DatasetEnum.DISTANCE]
 
     for dataset in datasets:
         for dataset_, (
