@@ -161,7 +161,7 @@ class BronzeAgeDecisionTree(nn.Module):
         return x
     
     @staticmethod
-    def from_data(x, y, out_channels: int, state_size: int, config: Config, use_linear_feature_combinations=False):
+    def from_data(x, y, out_channels: int, state_size: int, config: Config, use_linear_feature_combinations=False, layer_name=None):
         tree = DecisionTreeClassifier(random_state=0, max_leaf_nodes=config.max_leaf_nodes)
         x = BronzeAgeDecisionTree._preprocess_features(x, state_size, use_linear_feature_combinations)
         tree.fit(x, y)
@@ -309,7 +309,7 @@ class BronzeAgeGNN(torch.nn.Module):
             out_channels = decision_tree.get_submodule(key).out_channels
             use_linear_feature_combinations = not (key == "input" or (key == "output" and not self.config.dataset.uses_pooling))
             num_states = 0 if key == "output" and self.config.dataset.uses_pooling else self.config.state_size
-            decision_tree_module = BronzeAgeDecisionTree.from_data(inputs_train[key], outputs_train[key], out_channels, num_states, self.config, use_linear_feature_combinations=use_linear_feature_combinations)
+            decision_tree_module = BronzeAgeDecisionTree.from_data(inputs_train[key], outputs_train[key], out_channels, num_states, self.config, use_linear_feature_combinations=use_linear_feature_combinations, layer_name=key)
             decision_tree.set_submodule(key, decision_tree_module)
         
 

@@ -51,29 +51,30 @@ def extract_input_output(
     test_mask=None,
 ):
     """Extracts the input and output of the specified layers for the train and test dataset"""
+    device = next(model.parameters()).device
     if config.dataset.uses_mask:
         data = train_dataset[0]
         train_mask = data.train_mask
         test_mask = data.test_mask
         input_outputs_train = extract_features(
-            model, layer_names, data, "cpu", mask=train_mask
+            model, layer_names, data, device, mask=train_mask
         )
         input_outputs_test = extract_features(
-            model, layer_names, data, "cpu", mask=test_mask
+            model, layer_names, data, device, mask=test_mask
         )
     else:
         input_outputs_train = extract_features(
             model,
             layer_names,
             train_dataset,
-            "cpu",
+            device,    
             batch_size=config.batch_size,
         )
         input_outputs_test = extract_features(
             model,
             layer_names,
             test_dataset,
-            "cpu",
+            device,
             batch_size=config.batch_size,
         )
     return input_outputs_train, input_outputs_test

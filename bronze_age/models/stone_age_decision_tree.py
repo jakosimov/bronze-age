@@ -69,6 +69,7 @@ def get_features_used(estimator, data, num_classes=0):
 def tree_predict(
     x, tree, num_classes, linear_feature_combinations=False, pooling=False
 ):
+    device, dtype = x.device, x.dtype
     data = x.cpu().detach().numpy()
     if linear_feature_combinations:
         num_features = len(data[0]) // 2
@@ -78,7 +79,7 @@ def tree_predict(
     x = tree.predict(data)
     one_hot = np.zeros((x.size, num_classes))
     one_hot[np.arange(x.size), x] = 1
-    return torch.from_numpy(one_hot)
+    return torch.from_numpy(one_hot).to(device, dtype=dtype)
 
 
 class DTModule(torch.nn.Module):
