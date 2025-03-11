@@ -152,12 +152,12 @@ class BronzeAgeDecisionTree(nn.Module):
         if use_linear_feature_combinations:
             current_state = x[..., :num_states]
             neighbors = x[..., num_states:]
-            neighbors_difference = neighbors[..., None, :] < neighbors[..., :, None]
+            neighbors_difference = neighbors[..., :, None] > neighbors[..., None, :]
             # remove diagonal and flatten rest
             neighbors_difference = neighbors_difference[:, ~np.eye(neighbors_difference.shape[-1], dtype=bool)].reshape(
                 neighbors_difference.shape[0], -1
             )
-            x = np.concatenate((current_state, neighbors_difference), axis=-1)
+            x = np.concatenate((current_state, neighbors, neighbors_difference), axis=-1)
         return x
     
     @staticmethod
@@ -283,7 +283,7 @@ class BronzeAgeGNN(torch.nn.Module):
             if current_mask is not None:
                 x = x[current_mask]
                 y = y[current_mask]
-            y = torch.argmax(y, dim=-1, keepdim=True)
+            y = torch.argmax(y, dim=-1, keepdim=False)
             inputs_train[key].append(x.detach().cpu().numpy())
             outputs_train[key].append(y.detach().cpu().numpy())
             
@@ -307,15 +307,10 @@ class BronzeAgeGNN(torch.nn.Module):
         
         for key in inputs_train.keys():
             out_channels = decision_tree.get_submodule(key).out_channels
-            use_linear_feature_combinations = key != "input" and (key != "output" or not self.config.dataset.uses_pooling)
+            use_linear_feature_combinations = not (key == "input" or (key == "output" and not self.config.dataset.uses_pooling))
             num_states = 0 if key == "output" and self.config.dataset.uses_pooling else self.config.state_size
             decision_tree_module = BronzeAgeDecisionTree.from_data(inputs_train[key], outputs_train[key], out_channels, num_states, self.config, use_linear_feature_combinations=use_linear_feature_combinations)
             decision_tree.set_submodule(key, decision_tree_module)
         
 
-        #print("Extracted input and output shapes:")
-        #print("Inputs:")
-        #print({key: np.shape(value) for key, value in inputs_train.items()})
-        #print("Outputs:")
-        #print({key: np.shape(value) for key, value in outputs_train.items()})
         return decision_tree

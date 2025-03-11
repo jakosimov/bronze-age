@@ -300,10 +300,11 @@ def train(config: Config):
 
             
         if config.train_decision_tree:
+            model.eval()
             tree_model1 = train_decision_tree_model(
                 model.model, config, dataset.num_classes, train_dataset, val_dataset
             )
-            tree_model2 = best_validation_model.model.to_decision_tree(train_loader)
+            tree_model2 = best_validation_model.model.to_decision_tree(train_loader_test)
             wrapped_tree_model1 = LightningTestWrapper(
                 tree_model1, dataset.num_classes, config, class_weights=class_weights
             )
@@ -409,6 +410,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
         "train_decision_tree": True,
+        "aggregation_mode": AggregationMode.STONE_AGE,
     }
     config.update(kwargs)
     return Config(**config)

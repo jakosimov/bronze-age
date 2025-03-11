@@ -90,8 +90,8 @@ def extract_features(
     whose values are a tensor containing all feature maps from all batches.
     """
     extractor_net = FeatureExtractor(model, layer_names, mask=mask, vq=vq)
-
-    if mask is not None:
+    model.eval()
+    if mask is not None:    
         data = dataset.to(device)
         _ = extractor_net(data)
         return extractor_net.saver.io

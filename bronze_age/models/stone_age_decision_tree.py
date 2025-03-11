@@ -13,6 +13,7 @@ def linear_combo_features(input_data, state_size):
         input_data[np.newaxis, :, state_size:, None]
         > input_data[:, np.newaxis, state_size:]
     )
+    difference_features = difference_features[:, :, ~np.eye(difference_features.shape[2], dtype=bool)]
     difference_features = difference_features.reshape(len(input_data), -1).astype(int)
     return np.concatenate((input_data, difference_features), axis=1)
 
@@ -150,7 +151,7 @@ class StoneAgeGNNLayerDT(MessagePassing):
         return torch.clamp(message_sums, min=0, max=self.bounding_parameter)
 
     def update(self, inputs, x, explain=False):
-        combined = torch.cat((inputs, x), 1)
+        combined = torch.cat((x, inputs), 1)
         self.tree_input = combined.cpu().detach().numpy()
 
         if self.linear_feature_combinations:

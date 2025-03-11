@@ -93,7 +93,6 @@ def train_decision_tree(layer_name, input_outputs_train, config: Config, train_d
         data_input_train = linear_combo_features(data_input_train, num_features)
     clf = DecisionTreeClassifier(random_state=0, max_leaf_nodes=config.max_leaf_nodes)
     clf.fit(data_input_train, data_output_train)
-
     if layer_name == "output" and config.dataset.uses_pooling:
         clf = scale_pooling_num_node_samples(clf, data_input_train, train_dataset)
     return clf
@@ -104,9 +103,6 @@ def train_decision_tree_model(
 ):
     """Trains a decision tree model for the stone age gnn model"""
     layer_names = get_layer_names(config)
-    print(layer_names)
-    print(list(map(lambda x: x[0], gnn_model.named_modules())))
-
     (
         input_outputs_train,
         _,
