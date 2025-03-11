@@ -1,6 +1,12 @@
+from collections import defaultdict
+from copy import deepcopy
+from functools import partial
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.tree import DecisionTreeClassifier
 from torch_geometric.nn import MessagePassing, global_add_pool
 
 from bronze_age.config import AggregationMode
@@ -130,11 +136,43 @@ class BronzeAgeLayer(nn.Module):
         x2 = self.non_linearity(x1) if self.training else self.eval_non_linearity(x1)
 
         entropy_loss = nn.functional.mse_loss(x2, x1, reduction="mean")
-
-        
-            
         return x2, entropy_loss, explanation
     
+class BronzeAgeDecisionTree(nn.Module):
+    def __init__(self, tree, out_channels: int, state_size: int, config: Config, use_linear_feature_combinations=False):
+        super().__init__()
+        self.tree = tree
+        self.config = config
+        self.state_size = state_size
+        self.use_linear_feature_combinations = use_linear_feature_combinations
+        self.out_channels = out_channels
+
+    @staticmethod
+    def _preprocess_features(x, num_states, use_linear_feature_combinations=False):
+        if use_linear_feature_combinations:
+            current_state = x[..., :num_states]
+            neighbors = x[..., num_states:]
+            neighbors_difference = neighbors[..., None, :] < neighbors[..., :, None]
+            # remove diagonal and flatten rest
+            neighbors_difference = neighbors_difference[:, ~np.eye(neighbors_difference.shape[-1], dtype=bool)].reshape(
+                neighbors_difference.shape[0], -1
+            )
+            x = np.concatenate((current_state, neighbors_difference), axis=-1)
+        return x
+    
+    @staticmethod
+    def from_data(x, y, out_channels: int, state_size: int, config: Config, use_linear_feature_combinations=False):
+        tree = DecisionTreeClassifier(random_state=0, max_leaf_nodes=config.max_leaf_nodes)
+        x = BronzeAgeDecisionTree._preprocess_features(x, state_size, use_linear_feature_combinations)
+        tree.fit(x, y)
+        return BronzeAgeDecisionTree(tree, out_channels, state_size, config, use_linear_feature_combinations=use_linear_feature_combinations)
+    
+    def forward(self, x, return_explanation=False):
+        x1 = x.cpu().detach().numpy()
+        x1 = self._preprocess_features(x1, self.state_size, self.use_linear_feature_combinations)
+        y  = torch.tensor(self.tree.predict(x1)).to(device=x.device, dtype=torch.long)
+        return F.one_hot(y, self.out_channels).to(dtype=x.dtype, device=x.device), torch.tensor(0.0).to(device=x.device), None
+
 
 class BronzeAgeGNNLayer(MessagePassing):
     def __init__(self, in_channels, out_channels, config: Config, name=None):
@@ -231,3 +269,53 @@ class BronzeAgeGNN(torch.nn.Module):
             explanations = None
     
         return x, entropy, explanations
+    
+    def to_decision_tree(self, train_loader):
+        decision_tree = deepcopy(self)
+        inputs_train = defaultdict(list)
+        outputs_train = defaultdict(list)
+        current_mask = None
+        def _hook(module, input, output, key=None):
+            if key is None:
+                raise ValueError("Key must be provided")
+            x = input[0]
+            y = output[0]
+            if current_mask is not None:
+                x = x[current_mask]
+                y = y[current_mask]
+            y = torch.argmax(y, dim=-1, keepdim=True)
+            inputs_train[key].append(x.detach().cpu().numpy())
+            outputs_train[key].append(y.detach().cpu().numpy())
+            
+        hooks = []
+        for name, module in decision_tree.named_modules():
+            if isinstance(module, BronzeAgeLayer):
+                hooks.append(module.register_forward_hook(partial(_hook, key=name)))
+        
+        decision_tree.eval()
+        for data in train_loader:
+            if hasattr(data, "train_mask"):
+                current_mask = data.train_mask
+            decision_tree(data.x, data.edge_index, batch=data.batch)
+            current_mask = None
+
+        for hook in hooks:
+            hook.remove()
+        for key in inputs_train.keys():
+            inputs_train[key] = np.concatenate(inputs_train[key])
+            outputs_train[key] = np.concatenate(outputs_train[key])
+        
+        for key in inputs_train.keys():
+            out_channels = decision_tree.get_submodule(key).out_channels
+            use_linear_feature_combinations = key != "input" and (key != "output" or not self.config.dataset.uses_pooling)
+            num_states = 0 if key == "output" and self.config.dataset.uses_pooling else self.config.state_size
+            decision_tree_module = BronzeAgeDecisionTree.from_data(inputs_train[key], outputs_train[key], out_channels, num_states, self.config, use_linear_feature_combinations=use_linear_feature_combinations)
+            decision_tree.set_submodule(key, decision_tree_module)
+        
+
+        #print("Extracted input and output shapes:")
+        #print("Inputs:")
+        #print({key: np.shape(value) for key, value in inputs_train.items()})
+        #print("Outputs:")
+        #print({key: np.shape(value) for key, value in outputs_train.items()})
+        return decision_tree

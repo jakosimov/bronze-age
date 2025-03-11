@@ -10,8 +10,8 @@ def linear_combo_features(input_data, state_size):
     """Calculates the pairwise differences between the features and appends them to the input data"""
 
     difference_features = (
-        input_data[np.newaxis, :, :state_size, None]
-        > input_data[:, np.newaxis, :state_size]
+        input_data[np.newaxis, :, state_size:, None]
+        > input_data[:, np.newaxis, state_size:]
     )
     difference_features = difference_features.reshape(len(input_data), -1).astype(int)
     return np.concatenate((input_data, difference_features), axis=1)
@@ -192,10 +192,10 @@ class StoneAgeDecisionTree(torch.nn.Module):
         self.skip_connection = config.skip_connection
 
         for i in range(config.num_layers):
-            self.tree_depths.append(trees[f"stone_age.{i}.linear_softmax"].get_depth())
+            self.tree_depths.append(trees[f"stone_age.{i}.layer"].get_depth())
             self.stone_age.append(
                 StoneAgeGNNLayerDT(
-                    tree=trees[f"stone_age.{i}.linear_softmax"],
+                    tree=trees[f"stone_age.{i}.layer"],
                     index=i,
                     config=config,
                     linear_feature_combinations=linear_feature_combinations,

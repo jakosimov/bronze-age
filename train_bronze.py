@@ -203,7 +203,11 @@ class LightningTestWrapper(lightning.LightningModule):
         return self.model(x)
 
     def test_step(self, batch, batch_idx):
-        y_hat = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
+        out = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
+        if isinstance(out, tuple):
+            y_hat, _, _ = out
+        else:
+            y_hat = out
         # NLL loss
         y = batch.y
         if self.config.dataset.uses_mask:
@@ -263,8 +267,6 @@ def train(config: Config):
             class_weights=class_weights,
         )
 
-        model = torch.compile(model)
-        
         logger = pl_loggers.TensorBoardLogger(
             save_dir="lightning_logs", name=experiment_title
         )
@@ -295,17 +297,30 @@ def train(config: Config):
             0
         ]["test_acc"]
 
+
+            
         if config.train_decision_tree:
-            tree_model = train_decision_tree_model(
+            tree_model1 = train_decision_tree_model(
                 model.model, config, dataset.num_classes, train_dataset, val_dataset
             )
-            wrapped_tree_model = LightningTestWrapper(
-                tree_model, dataset.num_classes, config, class_weights=class_weights
+            tree_model2 = best_validation_model.model.to_decision_tree(train_loader)
+            wrapped_tree_model1 = LightningTestWrapper(
+                tree_model1, dataset.num_classes, config, class_weights=class_weights
             )
-            test_accuracy_dt = trainer.test(
-                wrapped_tree_model, test_loader, verbose=False
+            wrapped_tree_model2 = LightningTestWrapper(
+                tree_model2, dataset.num_classes, config, class_weights=class_weights
+            )
+            test_accuracy_dt1 = trainer.test(
+                wrapped_tree_model1, test_loader, verbose=False
             )[0]["test_acc_dt"]
-            test_accuracies_dt.append(test_accuracy_dt)
+            test_accuracy_dt2 = trainer.test(
+                wrapped_tree_model2, test_loader, verbose=False
+            )[0]["test_acc_dt"]
+            print(f"=====================")
+            print(f"DT1: {test_accuracy_dt1}")
+            print(f"DT2: {test_accuracy_dt2}")
+            print(f"=====================")
+            test_accuracies_dt.append(test_accuracy_dt2)
 
         print(f"=====================")
         print(f"Fold {i+1}/{config.num_cv}")
@@ -313,7 +328,7 @@ def train(config: Config):
         print(f"Validation accuracy: {best_validation_accuracy}")
         print(f"Test accuracy: {test_accuracy}")
         if config.train_decision_tree:
-            print(f"Test accuracy DT: {test_accuracy_dt}")
+            print(f"Test accuracy DT: {test_accuracy_dt1}")
         print(f"=====================")
 
         test_accuracies.append(test_accuracy)
@@ -393,6 +408,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "entropy_loss_scaling": 0,
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
+        "train_decision_tree": True,
     }
     config.update(kwargs)
     return Config(**config)

@@ -1,10 +1,10 @@
+import numpy as np
+import torch
+from sklearn.tree import DecisionTreeClassifier
+
 from bronze_age.config import Config
 from bronze_age.datasets import get_dataset
 from bronze_age.models.feature_extractor import extract_features
-import numpy as np
-from sklearn.tree import DecisionTreeClassifier
-import torch
-
 from bronze_age.models.stone_age_decision_tree import (
     StoneAgeDecisionTree,
     linear_combo_features,
@@ -35,7 +35,8 @@ def get_layer_names(config):
     number_of_layers = config.num_layers
     layer_names = ["input"]
     for i in range(number_of_layers):
-        layer_names.append(f"stone_age.{i}.linear_softmax")
+        #layer_names.append(f"stone_age.{i}.linear_softmax")
+        layer_names.append(f"stone_age.{i}.layer")
     layer_names.append("output")
     return layer_names
 
@@ -99,10 +100,12 @@ def train_decision_tree(layer_name, input_outputs_train, config: Config, train_d
 
 
 def train_decision_tree_model(
-    gnn_model, config: Config, out_channels, train_dataset, test_dataset
+    gnn_model : torch.nn.Module, config: Config, out_channels, train_dataset, test_dataset
 ):
     """Trains a decision tree model for the stone age gnn model"""
     layer_names = get_layer_names(config)
+    print(layer_names)
+    print(list(map(lambda x: x[0], gnn_model.named_modules())))
 
     (
         input_outputs_train,

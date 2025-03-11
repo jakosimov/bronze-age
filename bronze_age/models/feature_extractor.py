@@ -21,7 +21,7 @@ class SaveInputOutput:
             output_array = output_array.cpu().detach().numpy()
         else:
             input_array = module_in[0].detach().numpy()
-            output_array = module_out.detach().numpy()
+            output_array = module_out[0].detach().numpy()
         if self.mask is not None:
             input_array = input_array[self.mask]
             output_array = output_array[self.mask]
