@@ -41,14 +41,17 @@ class GumbelSoftmax(nn.Module):
         if self.training:
             return F.gumbel_softmax(x, hard=True, tau=self.tau)
         else:
-            return differentiable_argmax(x)
+            return F.one_hot(x.argmax(dim=-1), x.shape[-1]).to(dtype=x.dtype, device=x.device) # exact ones are needed for Decision Trees for some reason
 
 class DifferentiableArgmax(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
 
     def forward(self, x):
-        return differentiable_argmax(x)        
+        if self.training:
+            return differentiable_argmax(x)
+        else:
+            return F.one_hot(x.argmax(dim=-1), x.shape[-1]).to(dtype=x.dtype, device=x.device) # exact ones are needed for Decision Trees for some reason
 
 
 class MLP(torch.nn.Module):

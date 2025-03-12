@@ -123,9 +123,9 @@ class LightningModel(lightning.LightningModule):
             )
         entropy_loss = torch.stack(list(entropies.values())).sum()
         loss = (
-            _binary_cross_entropy_loss(y_hat, y, self.class_weights)
+            _binary_cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
             if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
-            else _cross_entropy_loss(y_hat, y, self.class_weights)
+            else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
         final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
         self.log("train_entropy_loss", entropy_loss, batch_size=batch.y.size(0))
@@ -149,9 +149,9 @@ class LightningModel(lightning.LightningModule):
             y_hat = y_hat[batch.val_mask]
             y = y[batch.val_mask]
         loss = (
-            _binary_cross_entropy_loss(y_hat, y, self.class_weights)
+            _binary_cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
             if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
-            else _cross_entropy_loss(y_hat, y, self.class_weights)
+            else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
         self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
 
@@ -174,9 +174,9 @@ class LightningModel(lightning.LightningModule):
             y_hat = y_hat[batch.test_mask]
             y = y[batch.test_mask]
         loss = (
-            _binary_cross_entropy_loss(y_hat, y, self.class_weights)
+            _binary_cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
             if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
-            else _cross_entropy_loss(y_hat, y, self.class_weights)
+            else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
         self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
 
@@ -329,7 +329,7 @@ def train(config: Config):
         print(f"Validation accuracy: {best_validation_accuracy}")
         print(f"Test accuracy: {test_accuracy}")
         if config.train_decision_tree:
-            print(f"Test accuracy DT: {test_accuracy_dt1}")
+            print(f"Test accuracy DT: {test_accuracy_dt2}")
         print(f"=====================")
 
         test_accuracies.append(test_accuracy)
@@ -402,11 +402,11 @@ def get_config_for_dataset(dataset, **kwargs):
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.MLP,
+        "layer_type": LayerType.DEEP_CONCEPT_REASONER,
         "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
         "concept_embedding_size": 128,
         "concept_temperature": 0.5,
-        "entropy_loss_scaling": 0,
+        "entropy_loss_scaling": 0.1,
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
         "train_decision_tree": True,
@@ -421,7 +421,9 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
     df.columns = ["success", "mean_acc", "std_acc", "mean_acc_dt", "std_acc_dt"]
 
     df.success = df.success.replace({True: "✅", False: "🛑"})
-    df2 = df[["success"]].copy()
+    df["uses_mask"] = df.index.map(lambda x: x.uses_mask)
+    df["uses_pooling"] = df.index.map(lambda x: x.uses_pooling)
+    df2 = df[["success", "uses_mask", "uses_pooling"]].copy()
 
     df2["GNN"] = (
         df["mean_acc"].map("{:.2f}".format, na_action="ignore")
@@ -459,7 +461,7 @@ if __name__ == "__main__":
         DatasetEnum.COLLAB,
     ]
     #datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
-
+    #datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
         for dataset_, (
             success,
