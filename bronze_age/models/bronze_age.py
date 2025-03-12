@@ -12,7 +12,7 @@ from torch_geometric.nn import MessagePassing, global_add_pool
 from bronze_age.config import AggregationMode
 from bronze_age.config import BronzeConfig as Config
 from bronze_age.config import LayerTypeBronze as LayerType
-from bronze_age.config import NonLinearity
+from bronze_age.config import LossMode, NonLinearity
 from bronze_age.models.concept_reasoner import (
     ConceptReasonerModule,
     GlobalConceptReasonerModule,
@@ -188,7 +188,7 @@ class BronzeAgeGNNLayer(MessagePassing):
         self.bounding_parameter = bounding_parameter
         if config.aggregation_mode == AggregationMode.STONE_AGE:
             self.layer = BronzeAgeLayer(2*in_channels, out_channels, config)
-        elif config.aggregation_mode == AggregationMode.BRONZE_AGE:
+        elif config.aggregation_mode in [AggregationMode.BRONZE_AGE, AggregationMode.BRONZE_AGE_ROUNDED]:
             bounding_parameter = config.bounding_parameter
             self.register_buffer("_Y_range", torch.arange(bounding_parameter).float())
         
@@ -242,6 +242,8 @@ class BronzeAgeGNN(torch.nn.Module):
 
         final_layer_inputs = (num_layers + 1) * state_size if self.skip_connection else state_size
         final_non_linearity = nn.LogSoftmax(dim=-1) if config.layer_type in [LayerType.LINEAR, LayerType.MLP] else None
+        if config.layer_type in [LayerType.LINEAR, LayerType.MLP] and config.loss_mode == LossMode.BINARY_CROSS_ENTROPY:
+            final_non_linearity = nn.Sigmoid()
         self.output = BronzeAgeLayer(final_layer_inputs, out_channels, config, non_linearity=final_non_linearity, name="PoolingLayer",)
 
         self.stone_age = nn.ModuleList()
@@ -249,12 +251,12 @@ class BronzeAgeGNN(torch.nn.Module):
             self.stone_age.append(BronzeAgeGNNLayer(state_size, state_size, config, name=f"StoneAgeLayer-{i}"))
     
     def forward(self, x, edge_index, batch=None, return_explanation=False):
-        x, loss_term, explanation = self.input(x.float())
+        x, loss_term, explanation = self.input(x.float(), return_explanation=return_explanation)
         entropy = {"input": loss_term}
         explanations = {"input": explanation}
         xs = [x]
         for layer in self.stone_age:
-            x, loss_term, explanation = layer(x, edge_index)
+            x, loss_term, explanation = layer(x, edge_index, return_explanation=return_explanation)
             entropy[layer.__name__] = loss_term
             explanations[layer.__name__] = explanation
             xs.append(x)
@@ -265,7 +267,7 @@ class BronzeAgeGNN(torch.nn.Module):
         if self.skip_connection:
             x = torch.cat(xs, dim=1)
 
-        x, _, explanation = self.output(x)
+        x, _, explanation = self.output(x, return_explanation=return_explanation)
         explanations["output"] = explanation
 
         if not return_explanation:
