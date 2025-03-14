@@ -299,29 +299,16 @@ def train(config: Config):
 
         if config.train_decision_tree:
             model.eval()
-            tree_model1 = train_decision_tree_model(
-                model.model, config, dataset.num_classes, train_dataset, val_dataset
-            )
-            tree_model2 = best_validation_model.model.to_decision_tree(
+            tree_model = best_validation_model.model.to_decision_tree(
                 train_loader_test
             )
-            wrapped_tree_model1 = LightningTestWrapper(
-                tree_model1, dataset.num_classes, config, class_weights=class_weights
+            wrapped_tree_model = LightningTestWrapper(
+                tree_model, dataset.num_classes, config, class_weights=class_weights
             )
-            wrapped_tree_model2 = LightningTestWrapper(
-                tree_model2, dataset.num_classes, config, class_weights=class_weights
-            )
-            test_accuracy_dt1 = trainer.test(
-                wrapped_tree_model1, test_loader, verbose=False
+            test_accuracy_dt = trainer.test(
+                wrapped_tree_model, test_loader, verbose=False
             )[0]["test_acc_dt"]
-            test_accuracy_dt2 = trainer.test(
-                wrapped_tree_model2, test_loader, verbose=False
-            )[0]["test_acc_dt"]
-            print(f"=====================")
-            print(f"DT1: {test_accuracy_dt1}")
-            print(f"DT2: {test_accuracy_dt2}")
-            print(f"=====================")
-            test_accuracies_dt.append(test_accuracy_dt2)
+            test_accuracies_dt.append(test_accuracy_dt)
 
         print(f"=====================")
         print(f"Fold {i+1}/{config.num_cv}")
@@ -329,7 +316,7 @@ def train(config: Config):
         print(f"Validation accuracy: {best_validation_accuracy}")
         print(f"Test accuracy: {test_accuracy}")
         if config.train_decision_tree:
-            print(f"Test accuracy DT: {test_accuracy_dt2}")
+            print(f"Test accuracy DT: {test_accuracy_dt}")
         print(f"=====================")
 
         test_accuracies.append(test_accuracy)
@@ -392,10 +379,10 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.REDDIT_BINARY: 5,
         DatasetEnum.COLLAB: 8,
         DatasetEnum.SIMPLE_SATURATION: 3,
-        DatasetEnum.DISTANCE: 8,
-        DatasetEnum.PATH_FINDING: 8,
-        DatasetEnum.PREFIX_SUM: 8,
-        DatasetEnum.ROOT_VALUE: 8,
+        DatasetEnum.DISTANCE: 4,
+        DatasetEnum.PATH_FINDING: 5,
+        DatasetEnum.PREFIX_SUM: 6,
+        DatasetEnum.ROOT_VALUE: 5,
         DatasetEnum.GAME_OF_LIFE: 2,
         DatasetEnum.HEXAGONAL_GAME_OF_LIFE: 2,
     }
@@ -414,17 +401,17 @@ def get_config_for_dataset(dataset, **kwargs):
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.DEEP_CONCEPT_REASONER,
-        "nonlinearity": None,
-        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "layer_type": LayerType.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
         "concept_embedding_size": 128,
         "concept_temperature": 0.5,
-        "entropy_loss_scaling": 0.1,
+        "entropy_loss_scaling": 0.0,
         "early_stopping": False,
         "loss_mode": LossMode.CROSS_ENTROPY,
-        "train_decision_tree": False,
-        "aggregation_mode": AggregationMode.BRONZE_AGE,
-        "num_recurrent_iterations": 1,
+        "train_decision_tree": True,
+        "aggregation_mode": AggregationMode.STONE_AGE,
+        "num_recurrent_iterations": 12,
     }
     config.update(kwargs)
     return Config(**config)
@@ -475,7 +462,7 @@ if __name__ == "__main__":
         DatasetEnum.COLLAB,
     ]
     # datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
-    datasets = [DatasetEnum.HEXAGONAL_GAME_OF_LIFE]
+    datasets = [DatasetEnum.DISTANCE]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
         for dataset_, (

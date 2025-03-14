@@ -1,7 +1,6 @@
+import networkx as nx
 import torch
 from torch_geometric.utils import from_networkx
-
-import networkx as nx
 
 from bronze_age.datasets.utils import random_tree
 
@@ -38,3 +37,4 @@ class PathFinding:
         for nodes in range(max(num_nodes - rangeValue, 2), num_nodes + rangeValue + 1):
             graphs += [self.__gen_graph(nodes, i) for i in range(num_graphs)]
         return graphs
+

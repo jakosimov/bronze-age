@@ -192,13 +192,13 @@ _DATASETS = {
     ),
     DatasetEnum.DISTANCE: lambda c: CustomDataset(Distance().data),
     DatasetEnum.PATH_FINDING: lambda c: CustomDataset(
-        PathFinding(num_nodes=15, num_graphs=200, rangeValue=0).data
+        PathFinding(num_nodes=4, num_graphs=200, rangeValue=3).data
     ),
     DatasetEnum.PREFIX_SUM: lambda c: CustomDataset(
-        PrefixSum(num_nodes=8, num_graphs=100, rangeValue=0).data
+        PrefixSum(num_nodes=4, num_graphs=350, rangeValue=5).data
     ),
     DatasetEnum.ROOT_VALUE: lambda c: CustomDataset(
-        RootValue(num_nodes=8, num_graphs=100, rangeValue=0).data
+        RootValue(num_nodes=4, num_graphs=100, rangeValue=4).data
     ),
     DatasetEnum.GAME_OF_LIFE: lambda c: CustomDataset(
         GameOfLifeGraph(num_graphs=10, grid_size=8, steps=1).data
