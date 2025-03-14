@@ -12,17 +12,18 @@ import bronze_age.datasets.utils as utils
 
 
 class Distance:
-    def __init__(self, num_nodes=10, num_graphs=1, min_diameter=1, max_diameter=None):
+    def __init__(self, num_nodes=10, num_graphs=100, min_diameter=1, max_diameter=None):
 
         self.num_features = 2
         self.num_classes = 2
 
         self.data = self.__makedata(num_graphs, num_nodes, min_diameter, max_diameter)
 
-    def __makedata(
-        self, num_graphs=200, num_nodes=1000, min_diameter=1, max_diameter=None
-    ):
-        return self.__gen_graph(num_nodes, min_diameter, max_diameter)
+    def __makedata(self, num_graphs, num_nodes, min_diameter=1, max_diameter=None):
+        return [
+            self.__gen_graph(num_nodes, min_diameter, max_diameter)
+            for _ in range(num_graphs)
+        ]
 
     def __gen_graph(self, num_nodes, min_diameter, max_diameter):
 
@@ -47,12 +48,12 @@ class Distance:
                     queue.append((nb, distance + 1))
         data = from_networkx(g)
         data.x = torch.tensor(
-            [[1.0, 0.0] if x != origin else [0.0, 1.0] for x in range(num_nodes)]
+            [[1, 0] if x != origin else [0, 1] for x in range(num_nodes)]
         )
 
         data.edge_attr = torch.ones(g.number_of_edges() * 2, 1)
 
-        data.y = torch.tensor([0.0 if n in dist_0 else 1.0 for n in range(num_nodes)])
+        data.y = torch.tensor([0 if n in dist_0 else 1 for n in range(num_nodes)])
         y = data.y
 
         train_mask = torch.zeros(y.size(0), dtype=torch.bool)

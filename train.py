@@ -359,6 +359,9 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.COLLAB: 3,
         DatasetEnum.SIMPLE_SATURATION: 1,
         DatasetEnum.DISTANCE: 3,
+        DatasetEnum.PATH_FINDING: 3,
+        DatasetEnum.PREFIX_SUM: 3,
+        DatasetEnum.ROOT_VALUE: 3,
     }
     NUM_STATES = {
         DatasetEnum.INFECTION: 6,
@@ -377,6 +380,9 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.COLLAB: 8,
         DatasetEnum.SIMPLE_SATURATION: 3,
         DatasetEnum.DISTANCE: 4,
+        DatasetEnum.PATH_FINDING: 4,
+        DatasetEnum.PREFIX_SUM: 4,
+        DatasetEnum.ROOT_VALUE: 4,
     }
     config = {
         "data_dir": "downloads",

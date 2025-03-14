@@ -297,14 +297,14 @@ def train(config: Config):
             0
         ]["test_acc"]
 
-
-            
         if config.train_decision_tree:
             model.eval()
             tree_model1 = train_decision_tree_model(
                 model.model, config, dataset.num_classes, train_dataset, val_dataset
             )
-            tree_model2 = best_validation_model.model.to_decision_tree(train_loader_test)
+            tree_model2 = best_validation_model.model.to_decision_tree(
+                train_loader_test
+            )
             wrapped_tree_model1 = LightningTestWrapper(
                 tree_model1, dataset.num_classes, config, class_weights=class_weights
             )
@@ -369,6 +369,10 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.REDDIT_BINARY: 2,
         DatasetEnum.COLLAB: 3,
         DatasetEnum.SIMPLE_SATURATION: 1,
+        DatasetEnum.DISTANCE: 1,
+        DatasetEnum.PATH_FINDING: 1,
+        DatasetEnum.PREFIX_SUM: 1,
+        DatasetEnum.ROOT_VALUE: 1,
     }
     NUM_STATES = {
         DatasetEnum.INFECTION: 6,
@@ -386,6 +390,10 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.REDDIT_BINARY: 5,
         DatasetEnum.COLLAB: 8,
         DatasetEnum.SIMPLE_SATURATION: 3,
+        DatasetEnum.DISTANCE: 8,
+        DatasetEnum.PATH_FINDING: 8,
+        DatasetEnum.PREFIX_SUM: 8,
+        DatasetEnum.ROOT_VALUE: 8,
     }
     config = {
         "data_dir": "downloads",
@@ -404,13 +412,15 @@ def get_config_for_dataset(dataset, **kwargs):
         "state_size": NUM_STATES[dataset],
         "layer_type": LayerType.DEEP_CONCEPT_REASONER,
         "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
         "concept_embedding_size": 128,
         "concept_temperature": 0.5,
-        "entropy_loss_scaling": 0.1,
-        "early_stopping": True,
+        "entropy_loss_scaling": 0.01,
+        "early_stopping": False,
         "loss_mode": LossMode.CROSS_ENTROPY,
-        "train_decision_tree": True,
-        "aggregation_mode": AggregationMode.STONE_AGE,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "num_recurrent_iterations": 1,
     }
     config.update(kwargs)
     return Config(**config)
@@ -460,8 +470,9 @@ if __name__ == "__main__":
         DatasetEnum.REDDIT_BINARY,
         DatasetEnum.COLLAB,
     ]
-    #datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
-    #datasets = [DatasetEnum.BA_2MOTIFS]
+    # datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
+    datasets = [DatasetEnum.ROOT_VALUE]
+    # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
         for dataset_, (
             success,

@@ -12,6 +12,9 @@ from torch_geometric.transforms import Compose
 
 from bronze_age.datasets.distance import Distance
 from bronze_age.datasets.infection import Infection
+from bronze_age.datasets.pathfinding import PathFinding
+from bronze_age.datasets.prefixsum import PrefixSum
+from bronze_age.datasets.rootvalue import RootValue
 from bronze_age.datasets.saturation import Saturation
 from bronze_age.datasets.simple_saturation import SimpleSaturation
 
@@ -92,6 +95,9 @@ class DatasetEnum(StrEnum):
     OGB_CODE2 = "OGB-code2"
     SIMPLE_SATURATION = "Simple_Saturation"
     DISTANCE = "Distance"
+    PATH_FINDING = "PathFinding"
+    PREFIX_SUM = "PrefixSum"
+    ROOT_VALUE = "RootValue"
 
     @property
     def uses_pooling(self):
@@ -181,7 +187,16 @@ _DATASETS = {
     DatasetEnum.OGB_CODE2: lambda c: PygGraphPropPredDataset(
         "ogbg-code2", root=c.data_dir
     ),
-    DatasetEnum.DISTANCE: lambda c: CustomDataset([Distance().data for i in range(10)]),
+    DatasetEnum.DISTANCE: lambda c: CustomDataset(Distance().data),
+    DatasetEnum.PATH_FINDING: lambda c: CustomDataset(
+        PathFinding(num_nodes=15, num_graphs=200, rangeValue=0).data
+    ),
+    DatasetEnum.PREFIX_SUM: lambda c: CustomDataset(
+        PrefixSum(num_nodes=8, num_graphs=100, rangeValue=0).data
+    ),
+    DatasetEnum.ROOT_VALUE: lambda c: CustomDataset(
+        RootValue(num_nodes=8, num_graphs=100, rangeValue=0).data
+    ),
 }
 
 _USES_POOLING = {
@@ -207,6 +222,9 @@ _USES_POOLING = {
     DatasetEnum.OGB_CODE2: True,
     DatasetEnum.SIMPLE_SATURATION: False,
     DatasetEnum.DISTANCE: False,
+    DatasetEnum.PATH_FINDING: False,
+    DatasetEnum.PREFIX_SUM: False,
+    DatasetEnum.ROOT_VALUE: False,
 }
 
 _USES_MASK = {
@@ -232,6 +250,9 @@ _USES_MASK = {
     DatasetEnum.OGB_CODE2: False,
     DatasetEnum.SIMPLE_SATURATION: False,
     DatasetEnum.DISTANCE: False,
+    DatasetEnum.PATH_FINDING: False,
+    DatasetEnum.PREFIX_SUM: False,
+    DatasetEnum.ROOT_VALUE: False,
 }
 
 
