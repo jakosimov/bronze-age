@@ -190,7 +190,13 @@ _DATASETS = {
     DatasetEnum.OGB_CODE2: lambda c: PygGraphPropPredDataset(
         "ogbg-code2", root=c.data_dir
     ),
-    DatasetEnum.DISTANCE: lambda c: CustomDataset(Distance().data),
+    DatasetEnum.DISTANCE: lambda c: CustomDataset(
+        Distance(num_graphs=300, num_nodes=6).data
+        + Distance(num_graphs=100, num_nodes=8).data
+        + Distance(num_graphs=100, num_nodes=4).data
+        + Distance(num_graphs=20, num_nodes=1).data
+        + Distance(num_graphs=20, num_nodes=2).data
+    ),
     DatasetEnum.PATH_FINDING: lambda c: CustomDataset(
         PathFinding(num_nodes=4, num_graphs=200, rangeValue=3).data
     ),
