@@ -11,6 +11,7 @@ from torch_geometric.datasets import Planetoid, TUDataset
 from torch_geometric.transforms import Compose
 
 from bronze_age.datasets.distance import Distance
+from bronze_age.datasets.game_of_life import GameOfLifeGraph, HexagonalGameOfLifeGraph
 from bronze_age.datasets.infection import Infection
 from bronze_age.datasets.pathfinding import PathFinding
 from bronze_age.datasets.prefixsum import PrefixSum
@@ -98,6 +99,8 @@ class DatasetEnum(StrEnum):
     PATH_FINDING = "PathFinding"
     PREFIX_SUM = "PrefixSum"
     ROOT_VALUE = "RootValue"
+    GAME_OF_LIFE = "GameOfLife"
+    HEXAGONAL_GAME_OF_LIFE = "HexagonalGameOfLife"
 
     @property
     def uses_pooling(self):
@@ -197,6 +200,12 @@ _DATASETS = {
     DatasetEnum.ROOT_VALUE: lambda c: CustomDataset(
         RootValue(num_nodes=8, num_graphs=100, rangeValue=0).data
     ),
+    DatasetEnum.GAME_OF_LIFE: lambda c: CustomDataset(
+        GameOfLifeGraph(num_graphs=10, grid_size=8, steps=1).data
+    ),
+    DatasetEnum.HEXAGONAL_GAME_OF_LIFE: lambda c: CustomDataset(
+        HexagonalGameOfLifeGraph(num_graphs=10, grid_size=8, steps=1).data
+    ),
 }
 
 _USES_POOLING = {
@@ -225,6 +234,8 @@ _USES_POOLING = {
     DatasetEnum.PATH_FINDING: False,
     DatasetEnum.PREFIX_SUM: False,
     DatasetEnum.ROOT_VALUE: False,
+    DatasetEnum.GAME_OF_LIFE: False,
+    DatasetEnum.HEXAGONAL_GAME_OF_LIFE: False,
 }
 
 _USES_MASK = {
@@ -253,6 +264,8 @@ _USES_MASK = {
     DatasetEnum.PATH_FINDING: False,
     DatasetEnum.PREFIX_SUM: False,
     DatasetEnum.ROOT_VALUE: False,
+    DatasetEnum.GAME_OF_LIFE: False,
+    DatasetEnum.HEXAGONAL_GAME_OF_LIFE: False,
 }
 
 

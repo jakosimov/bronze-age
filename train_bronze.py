@@ -373,6 +373,8 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.PATH_FINDING: 1,
         DatasetEnum.PREFIX_SUM: 1,
         DatasetEnum.ROOT_VALUE: 1,
+        DatasetEnum.GAME_OF_LIFE: 1,
+        DatasetEnum.HEXAGONAL_GAME_OF_LIFE: 1,
     }
     NUM_STATES = {
         DatasetEnum.INFECTION: 6,
@@ -394,6 +396,8 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.PATH_FINDING: 8,
         DatasetEnum.PREFIX_SUM: 8,
         DatasetEnum.ROOT_VALUE: 8,
+        DatasetEnum.GAME_OF_LIFE: 2,
+        DatasetEnum.HEXAGONAL_GAME_OF_LIFE: 2,
     }
     config = {
         "data_dir": "downloads",
@@ -402,7 +406,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "use_batch_norm": True,
         "hidden_units": 16,
         "skip_connection": True,
-        "bounding_parameter": 1000,
+        "bounding_parameter": 10,
         "batch_size": 128,
         "learning_rate": 0.01,
         "max_epochs": 1500,
@@ -411,11 +415,11 @@ def get_config_for_dataset(dataset, **kwargs):
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
         "layer_type": LayerType.DEEP_CONCEPT_REASONER,
-        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
-        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "nonlinearity": None,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
         "concept_embedding_size": 128,
         "concept_temperature": 0.5,
-        "entropy_loss_scaling": 0.01,
+        "entropy_loss_scaling": 0.1,
         "early_stopping": False,
         "loss_mode": LossMode.CROSS_ENTROPY,
         "train_decision_tree": False,
@@ -471,7 +475,7 @@ if __name__ == "__main__":
         DatasetEnum.COLLAB,
     ]
     # datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
-    datasets = [DatasetEnum.ROOT_VALUE]
+    datasets = [DatasetEnum.HEXAGONAL_GAME_OF_LIFE]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
         for dataset_, (

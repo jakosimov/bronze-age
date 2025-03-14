@@ -362,6 +362,8 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.PATH_FINDING: 3,
         DatasetEnum.PREFIX_SUM: 3,
         DatasetEnum.ROOT_VALUE: 3,
+        DatasetEnum.ROOT_VALUE: 1,
+        DatasetEnum.GAME_OF_LIFE: 1,
     }
     NUM_STATES = {
         DatasetEnum.INFECTION: 6,
@@ -383,6 +385,8 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.PATH_FINDING: 4,
         DatasetEnum.PREFIX_SUM: 4,
         DatasetEnum.ROOT_VALUE: 4,
+        DatasetEnum.GAME_OF_LIFE: 2,
+        DatasetEnum.HEXAGONAL_GAME_OF_LIFE: 2,
     }
     config = {
         "data_dir": "downloads",

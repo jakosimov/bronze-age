@@ -326,7 +326,9 @@ class BronzeAgeGNN(torch.nn.Module):
         )
 
         final_layer_inputs = (
-            (num_layers + 1) * state_size if self.skip_connection else state_size
+            (self.config.num_recurrent_iterations * num_layers + 1) * state_size
+            if self.skip_connection
+            else state_size
         )
         final_non_linearity = (
             nn.LogSoftmax(dim=-1)
@@ -361,9 +363,6 @@ class BronzeAgeGNN(torch.nn.Module):
         entropy = {"input": loss_term}
         explanations = {"input": explanation}
         xs = [x]
-
-        # This should maybe be in the contructor for config
-        assert not (self.config.num_recurrent_iterations > 1 and self.skip_connection)
 
         for iteration in range(self.config.num_recurrent_iterations):
             for layer in self.stone_age:
