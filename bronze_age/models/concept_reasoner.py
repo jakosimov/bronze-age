@@ -3,7 +3,7 @@ from collections import Counter
 
 import torch
 
-from bronze_age.config import Config
+from bronze_age.config import BronzeConfig, Config
 
 
 class Logic:
@@ -256,7 +256,6 @@ class ConceptReasoningLayer(torch.nn.Module):
                     )
 
         return explanations
-    
 
 
 class GlobalConceptReasoningLayer(torch.nn.Module):
@@ -303,9 +302,7 @@ class GlobalConceptReasoningLayer(torch.nn.Module):
         else:
             return preds
 
-    def explain(
-        self, c, mode, concept_names=None, class_names=None, filter_attn=None
-    ):
+    def explain(self, c, mode, concept_names=None, class_names=None, filter_attn=None):
         assert mode in ["local", "global", "exact"]
 
         if concept_names is None:
@@ -339,12 +336,8 @@ class GlobalConceptReasoningLayer(torch.nn.Module):
                     minterm = []
                     for concept_idx in range(len(concept_names)):
                         c_pred = c[sample_idx, concept_idx]
-                        sign_attn = sign_attn_mask[
-                            0, concept_idx, target_class
-                        ]
-                        filter_attn = filter_attn_mask[
-                            0, concept_idx, target_class
-                        ]
+                        sign_attn = sign_attn_mask[0, concept_idx, target_class]
+                        filter_attn = filter_attn_mask[0, concept_idx, target_class]
 
                         # we first check if the concept was relevant
                         # a concept is relevant <-> the filter attention score is lower than the concept probability
@@ -411,7 +404,7 @@ def generate_names(n_concepts, in_channels, bounding_parameter):
 
 
 class ConceptReasonerModule(torch.nn.Module):
-    def __init__(self, n_concepts, n_classes, emb_size, config: Config):
+    def __init__(self, n_concepts, n_classes, emb_size, config: Config | BronzeConfig):
         super(ConceptReasonerModule, self).__init__()
         self.emb_size = emb_size
         self.n_classes = n_classes
@@ -448,7 +441,7 @@ class ConceptReasonerModule(torch.nn.Module):
 
 
 class GlobalConceptReasonerModule(torch.nn.Module):
-    def __init__(self, n_concepts, n_classes, config: Config):
+    def __init__(self, n_concepts, n_classes, config: Config | BronzeConfig):
         super(GlobalConceptReasonerModule, self).__init__()
         self.n_classes = n_classes
         self.concept_reasoner = GlobalConceptReasoningLayer(

@@ -67,9 +67,11 @@ class AggregationMode(StrEnum):
     BRONZE_AGE = "bronze_age"
     BRONZE_AGE_ROUNDED = "bronze_age_rounded"
 
+
 class NonLinearity(StrEnum):
     GUMBEL_SOFTMAX = "gumbel_softmax"
     DIFFERENTIABLE_ARGMAX = "differentiable_argmax"
+
 
 @dataclass
 class BronzeConfig:
@@ -105,4 +107,4 @@ class BronzeConfig:
     entropy_loss_scaling: float = 0.2
     early_stopping: bool = True
     loss_mode: LossMode = LossMode.BINARY_CROSS_ENTROPY
-    
+    num_recurrent_iterations: int = 1
