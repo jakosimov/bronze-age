@@ -394,14 +394,6 @@ class GlobalConceptReasoningLayer(torch.nn.Module):
         return explanations
 
 
-def generate_names(n_concepts, in_channels, bounding_parameter):
-    names = [f"s_{i}" for i in range(n_concepts)] + [
-        f"s_{i}_count>{j}"
-        for i in range(in_channels)
-        for j in range(bounding_parameter)
-    ]
-    return names
-
 
 class ConceptReasonerModule(torch.nn.Module):
     def __init__(self, n_concepts, n_classes, emb_size, config: Config | BronzeConfig):

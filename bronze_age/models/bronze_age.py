@@ -85,7 +85,7 @@ class MLP(torch.nn.Module):
         for bn in self.bns:
             bn.reset_parameters()
 
-    def forward(self, x, return_explanation=False):
+    def forward(self, x, return_explanation=False, concept_names=None):
         for i, lin in enumerate(self.lins[:-1]):
             x = lin(x)
             x = self.bns[i](x)
@@ -102,7 +102,7 @@ class Linear(torch.nn.Module):
         super(Linear, self).__init__()
         self.lin = torch.nn.Linear(in_channels, out_channels)
 
-    def forward(self, x, return_explanation=False):
+    def forward(self, x, return_explanation=False, concept_names=None):
         x = self.lin(x)
         if return_explanation:
             return x, None
@@ -165,9 +165,9 @@ class BronzeAgeLayer(nn.Module):
         self.non_linearity = non_linearity or self.non_linearity
         self.eval_non_linearity = non_linearity or self.eval_non_linearity
 
-    def forward(self, x, return_explanation=False):
+    def forward(self, x, return_explanation=False, concept_names=None):
         if return_explanation:
-            x1, explanation = self.f(x, return_explanation=True)
+            x1, explanation = self.f(x, return_explanation=True, concept_names=concept_names)
         else:
             x1, explanation = self.f(x), None
 
@@ -235,7 +235,7 @@ class BronzeAgeDecisionTree(nn.Module):
             use_linear_feature_combinations=use_linear_feature_combinations,
         )
 
-    def forward(self, x, return_explanation=False):
+    def forward(self, x, return_explanation=False, concept_names=None):
         x1 = x.cpu().detach().numpy()
         x1 = self._preprocess_features(
             x1, self.state_size, self.use_linear_feature_combinations
@@ -346,9 +346,25 @@ class BronzeAgeGNNLayer(MessagePassing):
         else:
             raise NotImplementedError
 
+    def _get_concept_names(self):
+        if self.config.aggregation_mode == AggregationMode.STONE_AGE:
+            return [f"s_{i}" for i in range(self.in_channels)] + [
+                f"s_{i}_count"
+                for i in range(self.in_channels)
+            ]
+        elif self.config.aggregation_mode in [
+            AggregationMode.BRONZE_AGE,
+            AggregationMode.BRONZE_AGE_ROUNDED,
+        ]:
+            return [f"s_{i}" for i in range(self.in_channels)] + [
+                f"s_{i}_count>{j}"
+                for i in range(self.in_channels)
+                for j in range(self.bounding_parameter)
+                ]
+        
     def update(self, inputs, x, return_explanation=False):
         combined = torch.cat((x, inputs), 1)
-        return self.layer(combined, return_explanation=return_explanation)
+        return self.layer(combined, return_explanation=return_explanation, concept_names=self._get_concept_names())
 
 
 def fmt(key):
