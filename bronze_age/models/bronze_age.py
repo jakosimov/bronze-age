@@ -253,6 +253,10 @@ def _binary_cross_entropy_loss(y_hat, y, class_weights):
     return F.binary_cross_entropy(y_hat, y_one_hot, weight=class_weights)
 
 
+def _cross_entropy_loss(y_hat, y, class_weights):
+    return F.cross_entropy(y_hat, y, weight=class_weights)
+
+
 class ConceptReasonerTrainerModule(lightning.LightningModule):
     def __init__(self, layer_dict, config):
         super().__init__()
@@ -276,7 +280,8 @@ class ConceptReasonerTrainerModule(lightning.LightningModule):
         y_hat = self(x)
         loss = 0
         for key in y.keys():
-            loss += _binary_cross_entropy_loss(y_hat[key], y[key], class_weights=None)
+            loss += _cross_entropy_loss(y_hat[key], y[key], class_weights=None)
+        loss = loss / len(y)
         self.log("train_loss_trainer_teacher", loss, on_epoch=True)
         return loss
 
