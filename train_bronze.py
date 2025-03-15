@@ -189,7 +189,9 @@ class LightningModel(lightning.LightningModule):
 
 
 class LightningTestWrapper(lightning.LightningModule):
-    def __init__(self, model, num_classes, config: Config, class_weights=None):
+    def __init__(
+        self, model, num_classes, config: Config, class_weights=None, suffix="dt"
+    ):
         super().__init__()
         self.save_hyperparameters(ignore=["model"])
         self.model = model
@@ -198,6 +200,7 @@ class LightningTestWrapper(lightning.LightningModule):
             task="multiclass", num_classes=num_classes, average="micro"
         )
         self.class_weights = class_weights
+        self.suffix = suffix
 
     def forward(self, x):
         return self.model(x)
@@ -219,10 +222,14 @@ class LightningTestWrapper(lightning.LightningModule):
             y,
             weight=self.class_weights.to(dtype=y_hat.dtype, device=y_hat.device),
         )
-        self.log("test_loss_dt", loss, batch_size=batch.y.size(0), on_epoch=True)
+        self.log(
+            f"test_loss_{self.suffix}", loss, batch_size=batch.y.size(0), on_epoch=True
+        )
 
         self.test_accuracy(y_hat, y)
-        self.log("test_acc_dt", self.test_accuracy, on_step=False, on_epoch=True)
+        self.log(
+            f"test_acc_{self.suffix}", self.test_accuracy, on_step=False, on_epoch=True
+        )
         return loss
 
 
@@ -231,6 +238,7 @@ def train(config: Config):
 
     test_accuracies = []
     test_accuracies_dt = []
+    test_accuracies_cm = []
 
     start_time = pd.Timestamp.now().strftime("%d/%m/%y %H:%M")
     experiment_title = f"{start_time} {config.dataset}"
@@ -299,9 +307,7 @@ def train(config: Config):
 
         if config.train_decision_tree:
             model.eval()
-            tree_model = best_validation_model.model.to_decision_tree(
-                train_loader_test
-            )
+            tree_model = best_validation_model.model.to_decision_tree(train_loader_test)
             wrapped_tree_model = LightningTestWrapper(
                 tree_model, dataset.num_classes, config, class_weights=class_weights
             )
@@ -310,6 +316,22 @@ def train(config: Config):
             )[0]["test_acc_dt"]
             test_accuracies_dt.append(test_accuracy_dt)
 
+        model.eval()
+        concept_model = best_validation_model.model.train_concept_model(
+            train_loader_test, experiment_title=experiment_title
+        )
+        wrapped_concept_model = LightningTestWrapper(
+            concept_model,
+            dataset.num_classes,
+            config,
+            class_weights=class_weights,
+            suffix="cm",
+        )
+        test_accuracy_cm = trainer.test(
+            wrapped_concept_model, test_loader, verbose=False
+        )[0]["test_acc_cm"]
+        test_accuracies_cm.append(test_accuracy_cm)
+
         print(f"=====================")
         print(f"Fold {i+1}/{config.num_cv}")
         print(f"Train accuracy: {best_train_accuracy}")
@@ -317,6 +339,7 @@ def train(config: Config):
         print(f"Test accuracy: {test_accuracy}")
         if config.train_decision_tree:
             print(f"Test accuracy DT: {test_accuracy_dt}")
+        print(f"Test accuracy CM: {test_accuracy_cm}")
         print(f"=====================")
 
         test_accuracies.append(test_accuracy)
@@ -329,6 +352,9 @@ def train(config: Config):
         print(
             f"Average test accuracy DT: {np.mean(test_accuracies_dt)} with std: {np.std(test_accuracies_dt)}"
         )
+    print(
+        f"Average test accuracy CM: {np.mean(test_accuracies_cm)} with std: {np.std(test_accuracies_cm)}"
+    )
     print(f"=====================")
 
     return (
@@ -407,11 +433,11 @@ def get_config_for_dataset(dataset, **kwargs):
         "concept_embedding_size": 128,
         "concept_temperature": 0.5,
         "entropy_loss_scaling": 0.0,
-        "early_stopping": False,
+        "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
         "train_decision_tree": True,
         "aggregation_mode": AggregationMode.STONE_AGE,
-        "num_recurrent_iterations": 12,
+        "num_recurrent_iterations": 1,
     }
     config.update(kwargs)
     return Config(**config)
@@ -462,7 +488,7 @@ if __name__ == "__main__":
         DatasetEnum.COLLAB,
     ]
     # datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
-    datasets = [DatasetEnum.DISTANCE]
+    datasets = [DatasetEnum.SIMPLE_SATURATION]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
         for dataset_, (

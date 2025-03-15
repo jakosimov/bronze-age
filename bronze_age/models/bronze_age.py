@@ -2,11 +2,15 @@ from collections import defaultdict
 from copy import deepcopy
 from functools import partial
 
+import lightning
+from lightning.pytorch import loggers as pl_loggers
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.tree import DecisionTreeClassifier
+import torch.utils
+import torch.utils.data
 from torch_geometric.nn import MessagePassing, global_add_pool
 
 from bronze_age.config import AggregationMode
@@ -244,6 +248,42 @@ class BronzeAgeDecisionTree(nn.Module):
         )
 
 
+def _binary_cross_entropy_loss(y_hat, y, class_weights):
+    y_one_hot = F.one_hot(y.long(), num_classes=y_hat.shape[-1]).float()
+    return F.binary_cross_entropy(y_hat, y_one_hot, weight=class_weights)
+
+
+class ConceptReasonerTrainerModule(lightning.LightningModule):
+    def __init__(self, layer_dict, config):
+        super().__init__()
+        self.layer_dict = torch.nn.ModuleDict(
+            {fmt(key): layer for key, layer in layer_dict.items()}
+        )
+        self.config = config
+
+    def forward(self, x_dict):
+        return {
+            key: self.layer_dict[fmt(key)](
+                x,
+            )[0]
+            for key, x in x_dict.items()
+        }
+
+    def training_step(self, batch):
+        x = {key: x[0] for key, x in batch.items()}
+        y = {key: x[1] for key, x in batch.items()}
+
+        y_hat = self(x)
+        loss = 0
+        for key in y.keys():
+            loss += _binary_cross_entropy_loss(y_hat[key], y[key], class_weights=None)
+        self.log("train_loss_trainer_teacher", loss, on_epoch=True)
+        return loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=self.config.learning_rate)
+
+
 class BronzeAgeGNNLayer(MessagePassing):
     def __init__(self, in_channels, out_channels, config: Config, name=None):
         super(BronzeAgeGNNLayer, self).__init__(aggr="add")
@@ -298,6 +338,10 @@ class BronzeAgeGNNLayer(MessagePassing):
     def update(self, inputs, x, return_explanation=False):
         combined = torch.cat((x, inputs), 1)
         return self.layer(combined, return_explanation=return_explanation)
+
+
+def fmt(key):
+    return key.replace(".", "_")
 
 
 class BronzeAgeGNN(torch.nn.Module):
@@ -387,6 +431,90 @@ class BronzeAgeGNN(torch.nn.Module):
             explanations = None
 
         return x, entropy, explanations
+
+    def train_concept_model(self, train_loader, experiment_title=""):
+        final_model = deepcopy(self)
+        inputs_train = defaultdict(list)
+        outputs_train = defaultdict(list)
+        current_mask = None
+        config = deepcopy(self.config)
+
+        def _hook(module, input, output, key=None):
+            if key is None:
+                raise ValueError("Key must be provided")
+            x = input[0]
+            y = output[0]
+            if current_mask is not None:
+                x = x[current_mask]
+                y = y[current_mask]
+            y = torch.argmax(y, dim=-1, keepdim=False)
+            inputs_train[key].append(x.detach().cpu().numpy())
+            outputs_train[key].append(y.detach().cpu().numpy())
+
+        hooks = []
+        for name, module in final_model.named_modules():
+            if isinstance(module, BronzeAgeLayer):
+                hooks.append(module.register_forward_hook(partial(_hook, key=name)))
+
+        final_model.eval()
+        for data in train_loader:
+            if hasattr(data, "train_mask"):
+                current_mask = data.train_mask
+            final_model(data.x, data.edge_index, batch=data.batch)
+            current_mask = None
+
+        for hook in hooks:
+            hook.remove()
+        for key in inputs_train.keys():
+            inputs_train[key] = np.concatenate(inputs_train[key])
+            outputs_train[key] = np.concatenate(outputs_train[key])
+
+        per_layer_datasets = {
+            key: torch.utils.data.TensorDataset(
+                torch.tensor(inputs_train[key]), torch.tensor(outputs_train[key])
+            )
+            for key in inputs_train.keys()
+        }
+
+        stack_dataset = torch.utils.data.StackDataset(**per_layer_datasets)
+        train_data_loader = torch.utils.data.DataLoader(
+            stack_dataset, batch_size=final_model.config.batch_size, shuffle=True
+        )
+        layer_dict = {}
+        config.nonlinearity = None
+        config.evaluation_nonlinearity = None
+        for key in inputs_train.keys():
+            module = final_model.get_submodule(key)
+            out_channels = module.out_channels
+            in_channels = module.in_channels
+
+            new_module = BronzeAgeLayer(
+                in_channels,
+                out_channels,
+                config,
+                layer_type=LayerType.DEEP_CONCEPT_REASONER,
+                name=key,
+            )
+            layer_dict[key] = new_module
+
+        trainer_model = ConceptReasonerTrainerModule(layer_dict, config)
+
+        logger = pl_loggers.TensorBoardLogger(
+            save_dir="lightning_logs", name=experiment_title + " concept_trainer"
+        )
+        trainer = lightning.Trainer(
+            max_epochs=10,
+            log_every_n_steps=1,
+            enable_progress_bar=False,
+            logger=logger,
+        )
+
+        trainer.fit(trainer_model, train_data_loader)
+
+        for key, layer in layer_dict.items():
+            final_model.set_submodule(key, layer)
+
+        return final_model
 
     def to_decision_tree(self, train_loader):
         decision_tree = deepcopy(self)
