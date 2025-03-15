@@ -79,15 +79,16 @@ def _cross_entropy_loss(y_hat, y, class_weights):
 class LightningModel(lightning.LightningModule):
     def __init__(
         self,
-        num_node_features: int,
+        model: torch.nn.Module,
         num_classes: int,
         config: Config,
         class_weights=None,
+        suffix="",
     ):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=['model'])
         self.config = config
-        self.model = BronzeAgeGNN(num_node_features, num_classes, config)
+        self.model = model
         self.class_weights = class_weights
         self.train_accuracy = Accuracy(
             task="multiclass", num_classes=num_classes, average="micro"
@@ -98,6 +99,7 @@ class LightningModel(lightning.LightningModule):
         self.test_accuracy = Accuracy(
             task="multiclass", num_classes=num_classes, average="micro"
         )
+        self.suffix = suffix
 
     def forward(self, x):
         return self.model(x)
@@ -119,7 +121,7 @@ class LightningModel(lightning.LightningModule):
         }
         for key, value in entropies.items():
             self.log(
-                key, value, on_step=False, on_epoch=True, batch_size=batch.y.size(0)
+                f"key{self.suffix}", value, on_step=False, on_epoch=True, batch_size=batch.y.size(0)
             )
         entropy_loss = torch.stack(list(entropies.values())).sum()
         loss = (
@@ -128,13 +130,13 @@ class LightningModel(lightning.LightningModule):
             else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
         final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
-        self.log("train_entropy_loss", entropy_loss, batch_size=batch.y.size(0))
-        self.log("train_error_loss", loss, batch_size=batch.y.size(0))
-        self.log("train_loss", final_loss, batch_size=batch.y.size(0))
+        self.log(f"train_entropy_loss{self.suffix}", entropy_loss, batch_size=batch.y.size(0))
+        self.log(f"train_error_loss{self.suffix}", loss, batch_size=batch.y.size(0))
+        self.log(f"train_loss{self.suffix}", final_loss, batch_size=batch.y.size(0))
         # print("final_loss", final_loss)
 
         self.train_accuracy(y_hat, y)
-        self.log("train_acc", self.train_accuracy, on_step=False, on_epoch=True)
+        self.log(f"train_acc{self.suffix}", self.train_accuracy, on_step=False, on_epoch=True)
         return final_loss
 
     def validation_step(self, batch, batch_idx):
@@ -153,10 +155,10 @@ class LightningModel(lightning.LightningModule):
             if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
             else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
-        self.log("val_loss", loss, batch_size=y.size(0), on_epoch=True)
+        self.log(f"val_loss{self.suffix}", loss, batch_size=y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
-        self.log("val_acc", self.val_accuracy, on_step=False, on_epoch=True)
+        self.log(f"val_acc{self.suffix}", self.val_accuracy, on_step=False, on_epoch=True)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -166,7 +168,7 @@ class LightningModel(lightning.LightningModule):
             batch=batch.batch,
             return_explanation=True,
         )
-        explanation_path = Path(self.loggers[0].log_dir) / "explanations.txt"
+        explanation_path = Path(self.loggers[0].log_dir) / f"explanations{self.suffix}.txt"
         explanation_path.write_text(str(explanations))
         # NLL loss
         y = batch.y
@@ -178,59 +180,15 @@ class LightningModel(lightning.LightningModule):
             if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
             else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
-        self.log("test_loss", loss, batch_size=batch.y.size(0), on_epoch=True)
+        self.log(f"test_loss{self.suffix}", loss, batch_size=batch.y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
-        self.log("test_acc", self.val_accuracy, on_step=False, on_epoch=True)
+        self.log(f"test_acc{self.suffix}", self.val_accuracy, on_step=False, on_epoch=True)
         return loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
 
-
-class LightningTestWrapper(lightning.LightningModule):
-    def __init__(
-        self, model, num_classes, config: Config, class_weights=None, suffix="dt"
-    ):
-        super().__init__()
-        self.save_hyperparameters(ignore=["model"])
-        self.model = model
-        self.config = config
-        self.test_accuracy = Accuracy(
-            task="multiclass", num_classes=num_classes, average="micro"
-        )
-        self.class_weights = class_weights
-        self.suffix = suffix
-
-    def forward(self, x):
-        return self.model(x)
-
-    def test_step(self, batch, batch_idx):
-        out = self.model(x=batch.x, edge_index=batch.edge_index, batch=batch.batch)
-        if isinstance(out, tuple):
-            y_hat, _, _ = out
-        else:
-            y_hat = out
-        # NLL loss
-        y = batch.y
-        if self.config.dataset.uses_mask:
-            y_hat = y_hat[batch.test_mask]
-            y = y[batch.test_mask]
-
-        loss = F.nll_loss(
-            y_hat,
-            y,
-            weight=self.class_weights.to(dtype=y_hat.dtype, device=y_hat.device),
-        )
-        self.log(
-            f"test_loss_{self.suffix}", loss, batch_size=batch.y.size(0), on_epoch=True
-        )
-
-        self.test_accuracy(y_hat, y)
-        self.log(
-            f"test_acc_{self.suffix}", self.test_accuracy, on_step=False, on_epoch=True
-        )
-        return loss
 
 
 def train(config: Config):
@@ -268,12 +226,8 @@ def train(config: Config):
         class_weights = get_class_weights(
             train_dataset, val_dataset, config, dataset.num_classes, device=None
         )
-        model = LightningModel(
-            dataset.num_node_features,
-            dataset.num_classes,
-            config,
-            class_weights=class_weights,
-        )
+        gnn = BronzeAgeGNN(dataset.num_node_features, dataset.num_classes, config)
+        model = LightningModel(gnn,dataset.num_classes, config, class_weights=class_weights,)
 
         logger = pl_loggers.TensorBoardLogger(
             save_dir="lightning_logs", name=experiment_title
@@ -292,7 +246,7 @@ def train(config: Config):
         trainer.fit(model, train_loader, val_dataloaders=val_loader)
 
         best_validation_model = LightningModel.load_from_checkpoint(
-            checkpoint_callback.best_model_path
+            checkpoint_callback.best_model_path, model=gnn,
         )
 
         best_train_accuracy = trainer.test(
@@ -308,8 +262,12 @@ def train(config: Config):
         if config.train_decision_tree:
             model.eval()
             tree_model = best_validation_model.model.to_decision_tree(train_loader_test)
-            wrapped_tree_model = LightningTestWrapper(
-                tree_model, dataset.num_classes, config, class_weights=class_weights
+            wrapped_tree_model = LightningModel(
+                tree_model,
+                dataset.num_classes,
+                config,
+                class_weights=class_weights,
+                suffix="_dt",
             )
             test_accuracy_dt = trainer.test(
                 wrapped_tree_model, test_loader, verbose=False
@@ -321,12 +279,12 @@ def train(config: Config):
             concept_model = best_validation_model.model.train_concept_model(
                 train_loader_test, experiment_title=experiment_title
             )
-            wrapped_concept_model = LightningTestWrapper(
+            wrapped_concept_model = LightningModel(
                 concept_model,
                 dataset.num_classes,
                 config,
                 class_weights=class_weights,
-                suffix="cm",
+                suffix="_cm",
             )
             test_accuracy_cm = trainer.test(
                 wrapped_concept_model, test_loader, verbose=False
@@ -439,9 +397,9 @@ def get_config_for_dataset(dataset, **kwargs):
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
         "train_decision_tree": True,
-        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "aggregation_mode": AggregationMode.STONE_AGE,
         "num_recurrent_iterations": 1,
-        "teacher_max_epochs": 100,
+        "teacher_max_epochs": 15,
         "train_concept_model": True,
     }
     config.update(kwargs)
@@ -493,7 +451,7 @@ if __name__ == "__main__":
         DatasetEnum.COLLAB,
     ]
     # datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
-    datasets = [DatasetEnum.SIMPLE_SATURATION]
+    datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
         for dataset_, (

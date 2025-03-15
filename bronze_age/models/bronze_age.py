@@ -3,14 +3,14 @@ from copy import deepcopy
 from functools import partial
 
 import lightning
-from lightning.pytorch import loggers as pl_loggers
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.tree import DecisionTreeClassifier
 import torch.utils
 import torch.utils.data
+from lightning.pytorch import loggers as pl_loggers
+from sklearn.tree import DecisionTreeClassifier
 from torch_geometric.nn import MessagePassing, global_add_pool
 
 from bronze_age.config import AggregationMode
