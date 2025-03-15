@@ -280,9 +280,15 @@ class ConceptReasonerTrainerModule(lightning.LightningModule):
         y_hat = self(x)
         loss = 0
         for key in y.keys():
-            loss += _cross_entropy_loss(y_hat[key], y[key], class_weights=None)
+            loss += _binary_cross_entropy_loss(y_hat[key], y[key], class_weights=None)
         loss = loss / len(y)
-        self.log("train_loss_trainer_teacher", loss, on_epoch=True)
+        self.log(
+            "train_loss_trainer_teacher",
+            loss,
+            on_epoch=True,
+            on_step=False,
+            batch_size=y["input"].size(0),
+        )
         return loss
 
     def configure_optimizers(self):
@@ -508,7 +514,7 @@ class BronzeAgeGNN(torch.nn.Module):
             save_dir="lightning_logs", name=experiment_title + " concept_trainer"
         )
         trainer = lightning.Trainer(
-            max_epochs=10,
+            max_epochs=config.teacher_max_epochs,
             log_every_n_steps=1,
             enable_progress_bar=False,
             logger=logger,

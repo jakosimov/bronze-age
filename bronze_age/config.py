@@ -108,3 +108,5 @@ class BronzeConfig:
     early_stopping: bool = True
     loss_mode: LossMode = LossMode.BINARY_CROSS_ENTROPY
     num_recurrent_iterations: int = 1
+    teacher_max_epochs: int = 100
+    train_concept_model: bool = False

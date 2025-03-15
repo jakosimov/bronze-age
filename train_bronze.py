@@ -316,21 +316,22 @@ def train(config: Config):
             )[0]["test_acc_dt"]
             test_accuracies_dt.append(test_accuracy_dt)
 
-        model.eval()
-        concept_model = best_validation_model.model.train_concept_model(
-            train_loader_test, experiment_title=experiment_title
-        )
-        wrapped_concept_model = LightningTestWrapper(
-            concept_model,
-            dataset.num_classes,
-            config,
-            class_weights=class_weights,
-            suffix="cm",
-        )
-        test_accuracy_cm = trainer.test(
-            wrapped_concept_model, test_loader, verbose=False
-        )[0]["test_acc_cm"]
-        test_accuracies_cm.append(test_accuracy_cm)
+        if config.train_concept_model:
+            model.eval()
+            concept_model = best_validation_model.model.train_concept_model(
+                train_loader_test, experiment_title=experiment_title
+            )
+            wrapped_concept_model = LightningTestWrapper(
+                concept_model,
+                dataset.num_classes,
+                config,
+                class_weights=class_weights,
+                suffix="cm",
+            )
+            test_accuracy_cm = trainer.test(
+                wrapped_concept_model, test_loader, verbose=False
+            )[0]["test_acc_cm"]
+            test_accuracies_cm.append(test_accuracy_cm)
 
         print(f"=====================")
         print(f"Fold {i+1}/{config.num_cv}")
@@ -339,7 +340,8 @@ def train(config: Config):
         print(f"Test accuracy: {test_accuracy}")
         if config.train_decision_tree:
             print(f"Test accuracy DT: {test_accuracy_dt}")
-        print(f"Test accuracy CM: {test_accuracy_cm}")
+        if config.train_concept_model:
+            print(f"Test accuracy CM: {test_accuracy_cm}")
         print(f"=====================")
 
         test_accuracies.append(test_accuracy)
@@ -352,9 +354,10 @@ def train(config: Config):
         print(
             f"Average test accuracy DT: {np.mean(test_accuracies_dt)} with std: {np.std(test_accuracies_dt)}"
         )
-    print(
-        f"Average test accuracy CM: {np.mean(test_accuracies_cm)} with std: {np.std(test_accuracies_cm)}"
-    )
+    if config.train_concept_model:
+        print(
+            f"Average test accuracy CM: {np.mean(test_accuracies_cm)} with std: {np.std(test_accuracies_cm)}"
+        )
     print(f"=====================")
 
     return (
@@ -436,8 +439,10 @@ def get_config_for_dataset(dataset, **kwargs):
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
         "train_decision_tree": True,
-        "aggregation_mode": AggregationMode.STONE_AGE,
+        "aggregation_mode": AggregationMode.BRONZE_AGE,
         "num_recurrent_iterations": 1,
+        "teacher_max_epochs": 100,
+        "train_concept_model": True,
     }
     config.update(kwargs)
     return Config(**config)
