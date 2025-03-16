@@ -86,7 +86,7 @@ class LightningModel(lightning.LightningModule):
         suffix="",
     ):
         super().__init__()
-        self.save_hyperparameters(ignore=['model'])
+        self.save_hyperparameters(ignore=["model"])
         self.config = config
         self.model = model
         self.class_weights = class_weights
@@ -121,7 +121,11 @@ class LightningModel(lightning.LightningModule):
         }
         for key, value in entropies.items():
             self.log(
-                f"key{self.suffix}", value, on_step=False, on_epoch=True, batch_size=batch.y.size(0)
+                f"key{self.suffix}",
+                value,
+                on_step=False,
+                on_epoch=True,
+                batch_size=batch.y.size(0),
             )
         entropy_loss = torch.stack(list(entropies.values())).sum()
         loss = (
@@ -130,13 +134,17 @@ class LightningModel(lightning.LightningModule):
             else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
         final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
-        self.log(f"train_entropy_loss{self.suffix}", entropy_loss, batch_size=batch.y.size(0))
+        self.log(
+            f"train_entropy_loss{self.suffix}", entropy_loss, batch_size=batch.y.size(0)
+        )
         self.log(f"train_error_loss{self.suffix}", loss, batch_size=batch.y.size(0))
         self.log(f"train_loss{self.suffix}", final_loss, batch_size=batch.y.size(0))
         # print("final_loss", final_loss)
 
         self.train_accuracy(y_hat, y)
-        self.log(f"train_acc{self.suffix}", self.train_accuracy, on_step=False, on_epoch=True)
+        self.log(
+            f"train_acc{self.suffix}", self.train_accuracy, on_step=False, on_epoch=True
+        )
         return final_loss
 
     def validation_step(self, batch, batch_idx):
@@ -158,7 +166,9 @@ class LightningModel(lightning.LightningModule):
         self.log(f"val_loss{self.suffix}", loss, batch_size=y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
-        self.log(f"val_acc{self.suffix}", self.val_accuracy, on_step=False, on_epoch=True)
+        self.log(
+            f"val_acc{self.suffix}", self.val_accuracy, on_step=False, on_epoch=True
+        )
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -168,7 +178,9 @@ class LightningModel(lightning.LightningModule):
             batch=batch.batch,
             return_explanation=True,
         )
-        explanation_path = Path(self.loggers[0].log_dir) / f"explanations{self.suffix}.txt"
+        explanation_path = (
+            Path(self.loggers[0].log_dir) / f"explanations{self.suffix}.txt"
+        )
         explanation_path.write_text(str(explanations))
         # NLL loss
         y = batch.y
@@ -180,15 +192,18 @@ class LightningModel(lightning.LightningModule):
             if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
             else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
-        self.log(f"test_loss{self.suffix}", loss, batch_size=batch.y.size(0), on_epoch=True)
+        self.log(
+            f"test_loss{self.suffix}", loss, batch_size=batch.y.size(0), on_epoch=True
+        )
 
         self.val_accuracy(y_hat, y)
-        self.log(f"test_acc{self.suffix}", self.val_accuracy, on_step=False, on_epoch=True)
+        self.log(
+            f"test_acc{self.suffix}", self.val_accuracy, on_step=False, on_epoch=True
+        )
         return loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
-
 
 
 def train(config: Config):
@@ -196,6 +211,7 @@ def train(config: Config):
 
     test_accuracies = []
     test_accuracies_dt = []
+    test_accuracies_dt_pruned = []
     test_accuracies_cm = []
 
     start_time = pd.Timestamp.now().strftime("%d/%m/%y %H:%M")
@@ -227,7 +243,12 @@ def train(config: Config):
             train_dataset, val_dataset, config, dataset.num_classes, device=None
         )
         gnn = BronzeAgeGNN(dataset.num_node_features, dataset.num_classes, config)
-        model = LightningModel(gnn,dataset.num_classes, config, class_weights=class_weights,)
+        model = LightningModel(
+            gnn,
+            dataset.num_classes,
+            config,
+            class_weights=class_weights,
+        )
 
         logger = pl_loggers.TensorBoardLogger(
             save_dir="lightning_logs", name=experiment_title
@@ -246,7 +267,8 @@ def train(config: Config):
         trainer.fit(model, train_loader, val_dataloaders=val_loader)
 
         best_validation_model = LightningModel.load_from_checkpoint(
-            checkpoint_callback.best_model_path, model=gnn,
+            checkpoint_callback.best_model_path,
+            model=gnn,
         )
 
         best_train_accuracy = trainer.test(
@@ -274,6 +296,34 @@ def train(config: Config):
             )[0]["test_acc_dt"]
             test_accuracies_dt.append(test_accuracy_dt)
 
+            # Pruning
+            def score_model(model, loader):
+                wrapped_model = LightningModel(
+                    model,
+                    dataset.num_classes,
+                    config,
+                    class_weights=class_weights,
+                    suffix="_dt_while_pruning",
+                )
+                return trainer.test(wrapped_model, loader, verbose=False)[0][
+                    "test_acc_dt_while_pruning"
+                ]
+
+            pruned_tree_model, num_nodes_pruned = tree_model.prune_decision_trees(
+                train_loader_test, val_loader, score_model
+            )
+            wrapped_pruned_model = LightningModel(
+                pruned_tree_model,
+                dataset.num_classes,
+                config,
+                class_weights=class_weights,
+                suffix="_dt_pruned",
+            )
+            test_accuracy_dt_pruned = trainer.test(
+                wrapped_pruned_model, test_loader, verbose=False
+            )[0]["test_acc_dt_pruned"]
+            test_accuracies_dt_pruned.append(test_accuracy_dt_pruned)
+
         if config.train_concept_model:
             model.eval()
             concept_model = best_validation_model.model.train_concept_model(
@@ -298,6 +348,7 @@ def train(config: Config):
         print(f"Test accuracy: {test_accuracy}")
         if config.train_decision_tree:
             print(f"Test accuracy DT: {test_accuracy_dt}")
+            print(f"Test accuracy DT pruned: {test_accuracy_dt_pruned}")
         if config.train_concept_model:
             print(f"Test accuracy CM: {test_accuracy_cm}")
         print(f"=====================")
@@ -311,6 +362,9 @@ def train(config: Config):
     if config.train_decision_tree:
         print(
             f"Average test accuracy DT: {np.mean(test_accuracies_dt)} with std: {np.std(test_accuracies_dt)}"
+        )
+        print(
+            f"Average test accuracy DT pruned: {np.mean(test_accuracies_dt_pruned)} with std: {np.std(test_accuracies_dt_pruned)}"
         )
     if config.train_concept_model:
         print(
@@ -400,7 +454,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
         "num_recurrent_iterations": 1,
         "teacher_max_epochs": 15,
-        "train_concept_model": True,
+        "train_concept_model": False,
     }
     config.update(kwargs)
     return Config(**config)

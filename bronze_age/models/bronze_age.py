@@ -2,6 +2,7 @@ from collections import defaultdict
 from copy import deepcopy
 from functools import partial
 
+import sklearn.tree as sktree
 import lightning
 import numpy as np
 import torch
@@ -20,6 +21,11 @@ from bronze_age.config import LossMode, NonLinearity
 from bronze_age.models.concept_reasoner import (
     ConceptReasonerModule,
     GlobalConceptReasonerModule,
+)
+from bronze_age.models.prune_tree import (
+    get_max_depth,
+    get_traversal_order,
+    prune_node_from_tree,
 )
 
 
@@ -167,7 +173,9 @@ class BronzeAgeLayer(nn.Module):
 
     def forward(self, x, return_explanation=False, concept_names=None):
         if return_explanation:
-            x1, explanation = self.f(x, return_explanation=True, concept_names=concept_names)
+            x1, explanation = self.f(
+                x, return_explanation=True, concept_names=concept_names
+            )
         else:
             x1, explanation = self.f(x), None
 
@@ -349,8 +357,7 @@ class BronzeAgeGNNLayer(MessagePassing):
     def _get_concept_names(self):
         if self.config.aggregation_mode == AggregationMode.STONE_AGE:
             return [f"s_{i}" for i in range(self.in_channels)] + [
-                f"s_{i}_count"
-                for i in range(self.in_channels)
+                f"s_{i}_count" for i in range(self.in_channels)
             ]
         elif self.config.aggregation_mode in [
             AggregationMode.BRONZE_AGE,
@@ -360,11 +367,15 @@ class BronzeAgeGNNLayer(MessagePassing):
                 f"s_{i}_count>{j}"
                 for i in range(self.in_channels)
                 for j in range(self.bounding_parameter)
-                ]
-        
+            ]
+
     def update(self, inputs, x, return_explanation=False):
         combined = torch.cat((x, inputs), 1)
-        return self.layer(combined, return_explanation=return_explanation, concept_names=self._get_concept_names())
+        return self.layer(
+            combined,
+            return_explanation=return_explanation,
+            concept_names=self._get_concept_names(),
+        )
 
 
 def fmt(key):
@@ -602,3 +613,69 @@ class BronzeAgeGNN(torch.nn.Module):
             decision_tree.set_submodule(key, decision_tree_module)
 
         return decision_tree
+
+    def update_trees(self, trees):
+        for name, tree in trees.items():
+            self.get_submodule(name).tree = tree
+
+    def prune_decision_trees(self, train_loader, validation_loader, score_model):
+        """
+        Prunes the decision trees in the model by removing nodes that do not improve the validation score
+        :param train_loader: The training data loader
+        :param validation_loader: The validation data loader
+        :param score_model: The function to score the model
+        :return: A new model with pruned trees and the number of nodes pruned
+        """
+        decision_tree_model = deepcopy(self)
+
+        # score_before_train = score_model(decision_tree_model, train_loader)
+        score_before_val = score_model(decision_tree_model, validation_loader)
+
+        trees = {}
+        for name, module in decision_tree_model.named_modules():
+            if isinstance(module, BronzeAgeDecisionTree):
+                trees[name] = module.tree
+
+        for tree_name, tree in trees.items():
+            print(f"Tree {tree_name}")
+            print(sktree.export_text(tree))
+        print()
+
+        traversal_order = get_traversal_order(trees)
+
+        to_prune = []
+        for traversal_element in traversal_order:
+            node_id = traversal_element.node_id
+            tree_name = traversal_element.tree
+
+            original_tree = deepcopy(trees[tree_name])
+            tree_copy = deepcopy(trees[tree_name])
+
+            prune_node_from_tree(tree_copy.tree_, node_id)
+            trees[tree_name] = tree_copy
+            decision_tree_model.update_trees(trees)
+
+            score_after_train = score_model(decision_tree_model, train_loader)
+            score_after_val = score_model(decision_tree_model, validation_loader)
+            # What this condition should be may need to be adjusted
+            if (
+                score_after_val >= score_before_val
+                and score_after_train >= score_before_val
+            ):
+                to_prune.append((tree_name, node_id))
+                print(f"Pruned node {node_id} in {tree_name}")
+            else:
+                trees[tree_name] = original_tree
+                decision_tree_model.update_trees(trees)
+        print(f"Pruned {len(to_prune)} out of {len(traversal_order)} nodes")
+
+        for tree_name, tree in trees.items():
+            tree.tree_.max_depth = get_max_depth(tree, 0)
+
+        print("Pruned trees:")
+        for tree_name, tree in trees.items():
+            print(f"Tree {tree_name}")
+            print(sktree.export_text(tree))
+        print()
+
+        return decision_tree_model, len(to_prune)
