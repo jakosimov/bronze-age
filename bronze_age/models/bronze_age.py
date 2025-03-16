@@ -2,9 +2,9 @@ from collections import defaultdict
 from copy import deepcopy
 from functools import partial
 
-import sklearn.tree as sktree
 import lightning
 import numpy as np
+import sklearn.tree as sktree
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,53 +21,14 @@ from bronze_age.config import LossMode, NonLinearity
 from bronze_age.models.concept_reasoner import (
     ConceptReasonerModule,
     GlobalConceptReasonerModule,
+    MemoryBasedReasonerModule,
 )
 from bronze_age.models.prune_tree import (
     get_max_depth,
     get_traversal_order,
     prune_node_from_tree,
 )
-
-
-def differentiable_argmax(x):
-    y_soft = x.softmax(dim=-1)
-    index = y_soft.max(-1, keepdim=True)[1]
-    y_hard = torch.zeros_like(x, memory_format=torch.legacy_contiguous_format).scatter_(
-        -1, index, 1.0
-    )
-
-    # Return y_hard detached to prevent mixing correct gradients
-
-    # Use the STE trick:
-    # We add the softmax and subtract the detached softmax, letting the gradient pass through
-    return y_hard.detach() + y_soft - y_soft.detach()
-
-
-class GumbelSoftmax(nn.Module):
-    def __init__(self, config: Config):
-        super().__init__()
-        self.tau = config.temperature
-
-    def forward(self, x):
-        if self.training:
-            return F.gumbel_softmax(x, hard=True, tau=self.tau)
-        else:
-            return F.one_hot(x.argmax(dim=-1), x.shape[-1]).to(
-                dtype=x.dtype, device=x.device
-            )  # exact ones are needed for Decision Trees for some reason
-
-
-class DifferentiableArgmax(nn.Module):
-    def __init__(self, config: Config):
-        super().__init__()
-
-    def forward(self, x):
-        if self.training:
-            return differentiable_argmax(x)
-        else:
-            return F.one_hot(x.argmax(dim=-1), x.shape[-1]).to(
-                dtype=x.dtype, device=x.device
-            )  # exact ones are needed for Decision Trees for some reason
+from bronze_age.models.util import DifferentiableArgmax, GumbelSoftmax
 
 
 class MLP(torch.nn.Module):
@@ -98,9 +59,7 @@ class MLP(torch.nn.Module):
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.lins[-1](x)
-        if return_explanation:
-            return x, None
-        return x
+        return x, torch.tensor(0.0), None
 
 
 class Linear(torch.nn.Module):
@@ -110,9 +69,7 @@ class Linear(torch.nn.Module):
 
     def forward(self, x, return_explanation=False, concept_names=None):
         x = self.lin(x)
-        if return_explanation:
-            return x, None
-        return x
+        return x, torch.tensor(0.0), None
 
 
 class BronzeAgeLayer(nn.Module):
@@ -147,6 +104,8 @@ class BronzeAgeLayer(nn.Module):
             )
         elif layer_type == LayerType.GLOBAL_DEEP_CONCEPT_REASONER:
             self.f = GlobalConceptReasonerModule(in_channels, out_channels, config)
+        elif layer_type == LayerType.MEMORY_BASED_CONCEPT_REASONER:
+            self.f = MemoryBasedReasonerModule(in_channels, out_channels, config)
         else:
             raise NotImplementedError
 
@@ -172,19 +131,14 @@ class BronzeAgeLayer(nn.Module):
         self.eval_non_linearity = non_linearity or self.eval_non_linearity
 
     def forward(self, x, return_explanation=False, concept_names=None):
-        if return_explanation:
-            x1, explanation = self.f(
-                x, return_explanation=True, concept_names=concept_names
-            )
-        else:
-            x1, explanation = self.f(x), None
-
+        
+        x1, aux_loss, explanation = self.f(
+            x, return_explanation=return_explanation, concept_names=concept_names
+        )
+        
         x2 = self.non_linearity(x1) if self.training else self.eval_non_linearity(x1)
 
-        entropy_baseline = self.eval_non_linearity(x1)
-
-        entropy_loss = nn.functional.mse_loss(entropy_baseline, x1, reduction="mean")
-        return x2, entropy_loss, explanation
+        return x2, aux_loss, explanation
 
 
 class BronzeAgeDecisionTree(nn.Module):
@@ -530,7 +484,7 @@ class BronzeAgeGNN(torch.nn.Module):
                 in_channels,
                 out_channels,
                 config,
-                layer_type=LayerType.DEEP_CONCEPT_REASONER,
+                layer_type=LayerType.MEMORY_BASED_CONCEPT_REASONER,
                 name=key,
             )
             layer_dict[key] = new_module

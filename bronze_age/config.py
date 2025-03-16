@@ -60,6 +60,7 @@ class LayerTypeBronze(StrEnum):
     MLP = "mlp"
     DEEP_CONCEPT_REASONER = "deep-concept-reasoner"
     GLOBAL_DEEP_CONCEPT_REASONER = "global-deep-concept-reasoner"
+    MEMORY_BASED_CONCEPT_REASONER = "memory-based-concept-reasoner"
 
 
 class AggregationMode(StrEnum):

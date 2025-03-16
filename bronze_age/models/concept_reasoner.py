@@ -2,8 +2,11 @@ import abc
 from collections import Counter
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from bronze_age.config import BronzeConfig, Config
+from bronze_age.models.util import DifferentiableArgmax
 
 
 class Logic:
@@ -258,7 +261,7 @@ class ConceptReasoningLayer(torch.nn.Module):
         return explanations
 
 
-class GlobalConceptReasoningLayer(torch.nn.Module):
+class GlobalConceptReasoningLayer(nn.Module):
     def __init__(
         self,
         n_concepts,
@@ -270,8 +273,8 @@ class GlobalConceptReasoningLayer(torch.nn.Module):
         self.n_concepts = n_concepts
         self.n_classes = n_classes
         self.logic: Logic = logic
-        self.filter_nn = torch.nn.Embedding(n_concepts, n_classes)
-        self.sign_nn = torch.nn.Embedding(n_concepts, n_classes)
+        self.filter_nn = nn.Embedding(n_concepts, n_classes)
+        self.sign_nn = nn.Embedding(n_concepts, n_classes)
         self.temperature = temperature
 
     def forward(self, c, return_attn=False, sign_attn=None, filter_attn=None):
@@ -411,6 +414,8 @@ class ConceptReasonerModule(torch.nn.Module):
             torch.nn.LeakyReLU(),
         )
 
+        self.diff_argmax = DifferentiableArgmax(config)
+
     def forward(self, combined, return_explanation=False, concept_names=None):
         concept_embs = self.concept_context_generator(combined)
         concept_embs_shape = combined.shape[:-1] + (self.n_concepts, 2 * self.emb_size)
@@ -423,13 +428,17 @@ class ConceptReasonerModule(torch.nn.Module):
 
         x = self.concept_reasoner(embedding, combined)
 
+
+        entropy_loss = F.mse_loss(x, self.diff_argmax(x), reduction="mean")
+
         if return_explanation:
             explanation = self.concept_reasoner.explain(
                 embedding, combined, mode="global", concept_names=concept_names
             )
-            return x, explanation
+        else: 
+            explanation = None
 
-        return x
+        return x, entropy_loss, explanation
 
 
 class GlobalConceptReasonerModule(torch.nn.Module):
@@ -440,6 +449,8 @@ class GlobalConceptReasonerModule(torch.nn.Module):
             n_concepts, n_classes, temperature=config.concept_temperature
         )
 
+        self.diff_argmax = DifferentiableArgmax(config)
+
     def forward(self, combined, return_explanation=False, concept_names=None):
         x = self.concept_reasoner(combined)
 
@@ -447,6 +458,99 @@ class GlobalConceptReasonerModule(torch.nn.Module):
             explanation = self.concept_reasoner.explain(
                 combined, mode="global", concept_names=concept_names
             )
-            return x, explanation
+        else:
+            explanation = None
 
-        return x
+        entropy_loss = F.mse_loss(x, self.diff_argmax(x), reduction="mean")
+
+        return x, entropy_loss, explanation
+
+class MemoryBasedReasonerModule(torch.nn.Module):
+    def __init__(self, n_concepts, n_classes, config: Config | BronzeConfig, n_rules=2):
+        super(MemoryBasedReasonerModule, self).__init__()
+        self.n_concepts = n_concepts
+        self.n_classes = n_classes
+        self.n_rules = n_rules
+        self.emb_size = config.concept_embedding_size
+
+        self.rule_book = nn.Embedding(n_classes * n_rules, self.emb_size)
+
+        self.rule_decoder = nn.Sequential(
+            nn.Linear(self.emb_size, self.emb_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.emb_size, 3 * n_concepts),
+        )
+
+        """self.rule_decoder_highend = nn.Embedding(n_classes * n_rules * n_concepts, 3)"""
+
+        self.rule_selector = nn.Sequential(
+            nn.Linear(self.n_concepts, self.emb_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.emb_size, n_classes * n_rules),
+        )
+
+    
+    def decode_rules(self):
+        rule_embs = self.rule_book.weight.view(self.n_classes, self.n_rules, self.emb_size)
+        rules_decoded = self.rule_decoder(rule_embs).view(self.n_classes, self.n_rules, self.n_concepts, 3)
+        #rules_decoded = self.rule_decoder_highend.weight.view(self.n_classes, self.n_rules, self.n_concepts, 3)
+        rules_decoded = F.softmax(rules_decoded, dim=-1)
+        if not self.training:
+            # argmax to get the most likely rule
+            rules_decoded = F.one_hot(torch.argmax(rules_decoded, dim=-1), num_classes=3).float()
+        return rules_decoded
+
+
+    def forward(self, x, return_explanation=False, concept_names=None):
+        
+        rules_decoded = self.decode_rules()
+        rule_scores = self.rule_selector(x).view(-1, self.n_classes, self.n_rules)
+        rule_scores = F.softmax(rule_scores, dim=-1) # (batch_dim, n_classes, n_rules)
+        if not self.training:
+            # argmax to get the most likely rule
+            rule_scores = F.one_hot(torch.argmax(rule_scores, dim=-1), num_classes=self.n_rules).float()
+        
+        agg_rules = (rules_decoded[None, ...] * rule_scores[..., None, None]) # # (batch_dim, n_classes, n_rules, n_concepts, 3)
+        agg_rules = agg_rules.sum(dim=-3) 
+        pos_rules = agg_rules[..., 0] 
+        neg_rules = agg_rules[..., 1] 
+        irr_rules = agg_rules[..., 2]
+        x = x[..., None, :]
+        # batch_dim, n_classes, n_concepts
+        preds = (pos_rules * x + neg_rules * (1 - x) + irr_rules).prod(dim=-1)
+        #preds = preds.clamp(0.01, 0.99)
+        c_rec = 0.5 * irr_rules + pos_rules
+        #c_rec = c_rec.clamp(0.01, 0.99)
+        #c_rec_w = (1 - irr_rules)
+        #aux_loss = (F.binary_cross_entropy(pos_rules, x.repeat(1, pos_rules.shape[1], 1),reduction="none") * c_rec_w).mean(dim=-1)
+        aux_loss = F.binary_cross_entropy(c_rec, x.repeat(1, c_rec.shape[1], 1),reduction="none").mean(dim=-1)
+        aux_loss = (aux_loss * preds).mean()
+
+        explanations = None
+        assert not return_explanation or not self.training, "Explanation can only be returned in eval mode"
+        if return_explanation:
+            if concept_names is None:
+                concept_names = [f"c_{i}" for i in range(self.n_concepts)]
+            rule_counts = (rule_scores.round().to(torch.long) * preds[..., None].round().to(torch.long)).sum(dim=0) # (n_classes, n_rules)
+            from collections import defaultdict
+            rule_strings = defaultdict(list)
+            explanations = {}
+            for i in range(self.n_classes):
+                class_name = f"y_{i}"
+                for j in range(self.n_rules):
+                    for c in range(self.n_concepts):
+                        is_pos = rules_decoded[i, j, c, 0]
+                        is_neg = rules_decoded[i, j, c, 1]
+                        is_irr = rules_decoded[i, j, c, 2]
+                        if is_pos > 0.5:
+                            rule_strings[(i, j)].append(concept_names[c])
+                        elif is_neg > 0.5:
+                            rule_strings[(i, j)].append(f"~{concept_names[c]}")
+                explanations[class_name] = []
+                for j in range(self.n_rules):
+                    if rule_counts[i, j] > 0:
+                        rule_str = " & ".join(rule_strings[(i, j)])
+                        explanations[class_name].append(f"Rule {j}: {rule_str} (Counts: {rule_counts[i, j]})")
+
+        return preds, aux_loss, explanations
+    
