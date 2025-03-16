@@ -131,11 +131,11 @@ class BronzeAgeLayer(nn.Module):
         self.eval_non_linearity = non_linearity or self.eval_non_linearity
 
     def forward(self, x, return_explanation=False, concept_names=None):
-        
+
         x1, aux_loss, explanation = self.f(
             x, return_explanation=return_explanation, concept_names=concept_names
         )
-        
+
         x2 = self.non_linearity(x1) if self.training else self.eval_non_linearity(x1)
 
         return x2, aux_loss, explanation
@@ -424,12 +424,10 @@ class BronzeAgeGNN(torch.nn.Module):
 
         return x, entropy, explanations
 
-    def train_concept_model(self, train_loader, experiment_title=""):
-        final_model = deepcopy(self)
+    def get_inputs_outputs(self, train_loader):
         inputs_train = defaultdict(list)
         outputs_train = defaultdict(list)
         current_mask = None
-        config = deepcopy(self.config)
 
         def _hook(module, input, output, key=None):
             if key is None:
@@ -444,15 +442,15 @@ class BronzeAgeGNN(torch.nn.Module):
             outputs_train[key].append(y.detach().cpu().numpy())
 
         hooks = []
-        for name, module in final_model.named_modules():
+        for name, module in self.named_modules():
             if isinstance(module, BronzeAgeLayer):
                 hooks.append(module.register_forward_hook(partial(_hook, key=name)))
 
-        final_model.eval()
+        self.eval()
         for data in train_loader:
             if hasattr(data, "train_mask"):
                 current_mask = data.train_mask
-            final_model(data.x, data.edge_index, batch=data.batch)
+            self(data.x, data.edge_index, batch=data.batch)
             current_mask = None
 
         for hook in hooks:
@@ -460,6 +458,14 @@ class BronzeAgeGNN(torch.nn.Module):
         for key in inputs_train.keys():
             inputs_train[key] = np.concatenate(inputs_train[key])
             outputs_train[key] = np.concatenate(outputs_train[key])
+
+        return inputs_train, outputs_train
+
+    def train_concept_model(self, train_loader, experiment_title=""):
+        final_model = deepcopy(self)
+        config = deepcopy(self.config)
+
+        inputs_train, outputs_train = final_model.get_inputs_outputs(train_loader)
 
         per_layer_datasets = {
             key: torch.utils.data.TensorDataset(
@@ -484,7 +490,7 @@ class BronzeAgeGNN(torch.nn.Module):
                 in_channels,
                 out_channels,
                 config,
-                layer_type=LayerType.MEMORY_BASED_CONCEPT_REASONER,
+                layer_type=self.config.student_layer_type,
                 name=key,
             )
             layer_dict[key] = new_module
@@ -510,39 +516,7 @@ class BronzeAgeGNN(torch.nn.Module):
 
     def to_decision_tree(self, train_loader):
         decision_tree = deepcopy(self)
-        inputs_train = defaultdict(list)
-        outputs_train = defaultdict(list)
-        current_mask = None
-
-        def _hook(module, input, output, key=None):
-            if key is None:
-                raise ValueError("Key must be provided")
-            x = input[0]
-            y = output[0]
-            if current_mask is not None:
-                x = x[current_mask]
-                y = y[current_mask]
-            y = torch.argmax(y, dim=-1, keepdim=False)
-            inputs_train[key].append(x.detach().cpu().numpy())
-            outputs_train[key].append(y.detach().cpu().numpy())
-
-        hooks = []
-        for name, module in decision_tree.named_modules():
-            if isinstance(module, BronzeAgeLayer):
-                hooks.append(module.register_forward_hook(partial(_hook, key=name)))
-
-        decision_tree.eval()
-        for data in train_loader:
-            if hasattr(data, "train_mask"):
-                current_mask = data.train_mask
-            decision_tree(data.x, data.edge_index, batch=data.batch)
-            current_mask = None
-
-        for hook in hooks:
-            hook.remove()
-        for key in inputs_train.keys():
-            inputs_train[key] = np.concatenate(inputs_train[key])
-            outputs_train[key] = np.concatenate(outputs_train[key])
+        inputs_train, outputs_train = decision_tree.get_inputs_outputs(train_loader)
 
         for key in inputs_train.keys():
             out_channels = decision_tree.get_submodule(key).out_channels

@@ -111,3 +111,6 @@ class BronzeConfig:
     num_recurrent_iterations: int = 1
     teacher_max_epochs: int = 100
     train_concept_model: bool = False
+    student_layer_type: LayerTypeBronze = LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER
+    student_aggregation_mode: AggregationMode | None = None
+    concept_memory_disjunctions: int = 2

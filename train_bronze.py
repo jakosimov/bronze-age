@@ -427,6 +427,14 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.GAME_OF_LIFE: 2,
         DatasetEnum.HEXAGONAL_GAME_OF_LIFE: 2,
     }
+    NUM_ITERATIONS = {
+        DatasetEnum.DISTANCE: 12,
+        DatasetEnum.PATH_FINDING: 12,
+        DatasetEnum.PREFIX_SUM: 12,
+        DatasetEnum.ROOT_VALUE: 3,
+        DatasetEnum.GAME_OF_LIFE: 1,
+        DatasetEnum.HEXAGONAL_GAME_OF_LIFE: 1,
+    }
     config = {
         "data_dir": "downloads",
         "temperature": 1.0,
@@ -450,11 +458,13 @@ def get_config_for_dataset(dataset, **kwargs):
         "entropy_loss_scaling": 0.0,
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
-        "train_decision_tree": True,
-        "aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
-        "num_recurrent_iterations": 1,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "num_recurrent_iterations": NUM_ITERATIONS.get(dataset, 1),
         "teacher_max_epochs": 15,
-        "train_concept_model": False,
+        "train_concept_model": True,
+        "student_layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": None,
     }
     config.update(kwargs)
     return Config(**config)
