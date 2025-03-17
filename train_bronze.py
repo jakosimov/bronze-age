@@ -166,8 +166,10 @@ class LightningModel(lightning.LightningModule):
             else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
         final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
-        
-        self.log(f"val_loss{self.suffix}", final_loss, batch_size=y.size(0), on_epoch=True)
+
+        self.log(
+            f"val_loss{self.suffix}", final_loss, batch_size=y.size(0), on_epoch=True
+        )
 
         self.val_accuracy(y_hat, y)
         self.log(
@@ -296,7 +298,9 @@ def train(config: Config):
                 suffix="_dt",
             )
             # save the decision tree model
-            tree_model_path = Path(logger.log_dir) / "checkpoints" / f"decision_tree_model.pt"
+            tree_model_path = (
+                Path(logger.log_dir) / "checkpoints" / f"decision_tree_model.pt"
+            )
             torch.save(tree_model, tree_model_path)
             test_accuracy_dt = trainer.test(
                 wrapped_tree_model, test_loader, verbose=False
@@ -316,8 +320,10 @@ def train(config: Config):
                     "test_acc_dt_while_pruning"
                 ]
 
-            pruned_tree_model, num_nodes_pruned, num_nodes_remaining = tree_model.prune_decision_trees(
-                train_loader_test, val_loader, score_model
+            pruned_tree_model, num_nodes_pruned, num_nodes_remaining = (
+                tree_model.prune_decision_trees(
+                    train_loader_test, val_loader, score_model
+                )
             )
             wrapped_pruned_model = LightningModel(
                 pruned_tree_model,
@@ -326,7 +332,9 @@ def train(config: Config):
                 class_weights=class_weights,
                 suffix="_dt_pruned",
             )
-            pruned_tree_model_path = Path(logger.log_dir) / "checkpoints" / f"pruned_decision_tree_model.pt"
+            pruned_tree_model_path = (
+                Path(logger.log_dir) / "checkpoints" / f"pruned_decision_tree_model.pt"
+            )
             torch.save(pruned_tree_model, pruned_tree_model_path)
             test_accuracy_dt_pruned = trainer.test(
                 wrapped_pruned_model, test_loader, verbose=False
@@ -345,7 +353,9 @@ def train(config: Config):
                 class_weights=class_weights,
                 suffix="_cm",
             )
-            concept_model_path = Path(logger.log_dir) / "checkpoints" / f"concept_model.pt"
+            concept_model_path = (
+                Path(logger.log_dir) / "checkpoints" / f"concept_model.pt"
+            )
             torch.save(concept_model, concept_model_path)
             test_accuracy_cm = trainer.test(
                 wrapped_concept_model, test_loader, verbose=False
@@ -359,7 +369,9 @@ def train(config: Config):
         print(f"Test accuracy: {test_accuracy}")
         if config.train_decision_tree:
             print(f"Test accuracy DT: {test_accuracy_dt}")
-            print(f"Test accuracy DT pruned ({num_nodes_remaining} nodes): {test_accuracy_dt_pruned}")
+            print(
+                f"Test accuracy DT pruned ({num_nodes_remaining} nodes): {test_accuracy_dt_pruned}"
+            )
         if config.train_concept_model:
             print(f"Test accuracy CM: {test_accuracy_cm}")
         print(f"=====================")
@@ -449,7 +461,7 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.HEXAGONAL_GAME_OF_LIFE: 1,
     }
     BATCH_SIZES = {
-        DatasetEnum.SATURATION : 1,
+        DatasetEnum.SATURATION: 1,
     }
     config = {
         "data_dir": "downloads",
@@ -475,12 +487,12 @@ def get_config_for_dataset(dataset, **kwargs):
         "early_stopping": True,
         "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
         "train_decision_tree": False,
-        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "aggregation_mode": AggregationMode.STONE_AGE,
         "num_recurrent_iterations": NUM_ITERATIONS.get(dataset, 1),
         "teacher_max_epochs": 15,
         "train_concept_model": False,
         "student_layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
-        "student_aggregation_mode": None,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
         "concept_memory_disjunctions": 4,
     }
     config.update(kwargs)
@@ -489,13 +501,21 @@ def get_config_for_dataset(dataset, **kwargs):
 
 def store_results(results, filename="results.csv", filename2="results2.csv"):
     df = pd.DataFrame(results).T
-    df.columns = ["success", "mean_acc", "std_acc", "mean_acc_dt", "std_acc_dt", "mean_acc_dt_pruned", "std_acc_dt_pruned"]
+    df.columns = [
+        "success",
+        "mean_acc",
+        "std_acc",
+        "mean_acc_dt",
+        "std_acc_dt",
+        "mean_acc_dt_pruned",
+        "std_acc_dt_pruned",
+    ]
 
     df.success = df.success.replace({True: "✅", False: "🛑"})
     df["uses_mask"] = df.index.map(lambda x: x.uses_mask)
     df["uses_pooling"] = df.index.map(lambda x: x.uses_pooling)
     df.to_csv(filename)
-    
+
     df2 = df[["success", "uses_mask", "uses_pooling"]].copy()
 
     df2["GNN"] = (
@@ -547,8 +567,8 @@ if __name__ == "__main__":
         DatasetEnum.HEXAGONAL_GAME_OF_LIFE,
     ]
 
-    datasets = [DatasetEnum.SIMPLE_SATURATION] #+ datasets
-    #datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
+    datasets = [DatasetEnum.SIMPLE_SATURATION]  # + datasets
+    # datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
         for dataset_, (
@@ -573,12 +593,28 @@ if __name__ == "__main__":
         try:
             config = get_config_for_dataset(dataset)
             lightning.seed_everything(0)
-            mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned = train(config)
-            results[dataset] = (True, mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned)
+            (
+                mean_acc,
+                std_acc,
+                mean_acc_dt,
+                std_acc_dt,
+                mean_acc_dt_pruned,
+                std_acc_dt_pruned,
+            ) = train(config)
+            results[dataset] = (
+                True,
+                mean_acc,
+                std_acc,
+                mean_acc_dt,
+                std_acc_dt,
+                mean_acc_dt_pruned,
+                std_acc_dt_pruned,
+            )
         except Exception as e:
             print(f"Error with dataset {dataset}: {e}")
             results[dataset] = (False, None, None, None, None, None, None)
             import traceback
+
             traceback.print_exc()
             raise e
 
