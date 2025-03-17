@@ -130,13 +130,36 @@ class BronzeAgeLayer(nn.Module):
         self.non_linearity = non_linearity or self.non_linearity
         self.eval_non_linearity = non_linearity or self.eval_non_linearity
 
+        self.inputs_list = None
+        self.outputs_list = None
+        self.mask_ref = None
+
+    def set_inputs_outputs(self, inputs_list, outputs_list, mask_ref):
+        self.inputs_list = inputs_list
+        self.outputs_list = outputs_list
+        self.mask_ref = mask_ref
+
+    def clear_inputs_outputs(self):
+        self.inputs_list = None
+        self.outputs_list = None
+        self.mask_ref = None
+
     def forward(self, x, return_explanation=False, concept_names=None):
+        if self.inputs_list is not None:
+            self.inputs_list.append(
+                x[self.mask_ref.current_mask].detach().cpu().numpy()
+            )
 
         x1, aux_loss, explanation = self.f(
             x, return_explanation=return_explanation, concept_names=concept_names
         )
 
         x2 = self.non_linearity(x1) if self.training else self.eval_non_linearity(x1)
+
+        if self.outputs_list is not None:
+            self.outputs_list.append(
+                x2[self.mask_ref.current_mask].detach().cpu().numpy()
+            )
 
         return x2, aux_loss, explanation
 
@@ -264,17 +287,19 @@ class BronzeAgeGNNLayer(MessagePassing):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.a = config.a
+
         bounding_parameter = config.bounding_parameter
         self.bounding_parameter = bounding_parameter
+
+        bounding_parameter = config.bounding_parameter
+        self.register_buffer("_Y_range", torch.arange(bounding_parameter).float())
+
         if config.aggregation_mode == AggregationMode.STONE_AGE:
             self.layer = BronzeAgeLayer(2 * in_channels, out_channels, config)
         elif config.aggregation_mode in [
             AggregationMode.BRONZE_AGE,
             AggregationMode.BRONZE_AGE_ROUNDED,
         ]:
-            bounding_parameter = config.bounding_parameter
-            self.register_buffer("_Y_range", torch.arange(bounding_parameter).float())
-
             self.layer = BronzeAgeLayer(
                 in_channels * (bounding_parameter + 1), out_channels, config
             )
@@ -283,6 +308,20 @@ class BronzeAgeGNNLayer(MessagePassing):
 
         if name is not None:
             self.__name__ = name
+
+        self.inputs_list = None
+        self.outputs_list = None
+        self.mask_ref = None
+
+    def set_inputs_outputs(self, inputs_list, outputs_list, mask_ref):
+        self.inputs_list = inputs_list
+        self.outputs_list = outputs_list
+        self.mask_ref = mask_ref
+
+    def clear_inputs_outputs(self):
+        self.inputs_list = None
+        self.outputs_list = None
+        self.mask_ref = None
 
     def forward(self, x, edge_index, return_explanation=False):
         return self.propagate(edge_index, x=x, return_explanation=return_explanation)
@@ -293,18 +332,21 @@ class BronzeAgeGNNLayer(MessagePassing):
     def aggregate(self, inputs, index, ptr, dim_size):
         message_sums = super().aggregate(inputs, index, ptr=ptr, dim_size=dim_size)
         clamped_sum = torch.clamp(message_sums, min=0, max=self.bounding_parameter)
+
+        states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
+        states = F.sigmoid(self.a * states)
+        states = states.view(*states.shape[:-2], -1)
+
+        rounded_states = states + states.detach().round().float() - states.detach()
+        if self.inputs_list is not None:
+            return clamped_sum, states, rounded_states
+
         if self.config.aggregation_mode == AggregationMode.STONE_AGE:
             return clamped_sum
-        elif self.config.aggregation_mode in [
-            AggregationMode.BRONZE_AGE,
-            AggregationMode.BRONZE_AGE_ROUNDED,
-        ]:
-            states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
-            states = F.sigmoid(self.a * states)
-            states = states.view(*states.shape[:-2], -1)
-            if self.config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
-                states = states + states.detach().round().float() - states.detach()
+        elif self.config.aggregation_mode == AggregationMode.BRONZE_AGE:
             return states
+        elif self.config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
+            return rounded_states
         else:
             raise NotImplementedError
 
@@ -324,12 +366,38 @@ class BronzeAgeGNNLayer(MessagePassing):
             ]
 
     def update(self, inputs, x, return_explanation=False):
-        combined = torch.cat((x, inputs), 1)
-        return self.layer(
+        if self.inputs_list is not None:
+            clamped_sum, states, rounded_states = inputs
+            combined_clamped = torch.cat((x, clamped_sum), 1)
+            combined_states = torch.cat((x, states), 1)
+            combined_rounded = torch.cat((x, rounded_states), 1)
+            self.inputs_list.append(
+                (
+                    combined_clamped[self.mask_ref.current_mask].detach().cpu().numpy(),
+                    combined_states[self.mask_ref.current_mask].detach().cpu().numpy(),
+                    combined_rounded[self.mask_ref.current_mask].detach().cpu().numpy(),
+                )
+            )
+            if self.config.aggregation_mode == AggregationMode.STONE_AGE:
+                combined = combined_clamped
+            elif self.config.aggregation_mode == AggregationMode.BRONZE_AGE:
+                combined = combined_states
+            elif self.config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
+                combined = combined_rounded
+        else:
+            combined = torch.cat((x, inputs), 1)
+
+        output, aux_loss, explanation = self.layer(
             combined,
             return_explanation=return_explanation,
             concept_names=self._get_concept_names(),
         )
+
+        if self.outputs_list is not None:
+            self.outputs_list.append(
+                output[self.mask_ref.current_mask].detach().cpu().numpy()
+            )
+        return output, aux_loss, explanation
 
 
 def fmt(key):
@@ -424,6 +492,77 @@ class BronzeAgeGNN(torch.nn.Module):
 
         return x, entropy, explanations
 
+    def get_inputs_outputs_fancy(self, train_loader, aggregation_mode):
+        inputs_train = defaultdict(list)
+        outputs_train = defaultdict(list)
+
+        class MaskRef:
+            def __init__(self):
+                self.current_mask = None
+
+        mask_ref = MaskRef()
+
+        self.get_submodule("input").set_inputs_outputs(
+            inputs_train["input"], outputs_train["input"], mask_ref
+        )
+        self.get_submodule("output").set_inputs_outputs(
+            inputs_train["output"], outputs_train["output"], mask_ref
+        )
+
+        for name, module in self.named_modules():
+            if isinstance(module, BronzeAgeGNNLayer):
+                module.set_inputs_outputs(
+                    inputs_train[name], outputs_train[name], mask_ref
+                )
+
+        self.eval()
+        for data in train_loader:
+            if hasattr(data, "train_mask"):
+                mask_ref.current_mask = data.train_mask
+            else:
+                mask_ref.current_mask = torch.ones(data.x.size(0), dtype=torch.bool)
+            self(data.x, data.edge_index, batch=data.batch)
+            mask_ref.current_mask = None
+
+        for name in inputs_train.keys():
+            module = self.get_submodule(name)
+            module.clear_inputs_outputs()
+
+        for key in inputs_train.keys():
+            inputs = inputs_train[key]
+            if key not in ["input", "output"]:
+                stone_age_inputs = [stone_age_input for stone_age_input, _, _ in inputs]
+                bronze_age_inputs = [
+                    bronze_age_input for _, bronze_age_input, _ in inputs
+                ]
+                bronze_age_rounded_inputs = [
+                    bronze_age_rounded_input
+                    for _, _, bronze_age_rounded_input in inputs
+                ]
+                if aggregation_mode == AggregationMode.STONE_AGE:
+                    inputs = stone_age_inputs
+                elif aggregation_mode == AggregationMode.BRONZE_AGE:
+                    inputs = bronze_age_inputs
+                elif aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
+                    inputs = bronze_age_rounded_inputs
+            outputs = outputs_train[key]
+            inputs_train[key] = np.concatenate(inputs)
+            outputs_train[key] = np.concatenate(
+                [np.argmax(output, axis=-1) for output in outputs]
+            )
+
+        new_inputs_train = {}
+        new_outputs_train = {}
+        for key in inputs_train.keys():
+            if key not in ["input", "output"]:
+                new_key = key + ".layer"
+            else:
+                new_key = key
+            new_inputs_train[new_key] = inputs_train[key]
+            new_outputs_train[new_key] = outputs_train[key]
+
+        return new_inputs_train, new_outputs_train
+
     def get_inputs_outputs(self, train_loader):
         inputs_train = defaultdict(list)
         outputs_train = defaultdict(list)
@@ -464,8 +603,13 @@ class BronzeAgeGNN(torch.nn.Module):
     def train_concept_model(self, train_loader, experiment_title=""):
         final_model = deepcopy(self)
         config = deepcopy(self.config)
+        student_aggregation_mode = (
+            config.student_aggregation_mode or config.aggregation_mode
+        )
 
-        inputs_train, outputs_train = final_model.get_inputs_outputs(train_loader)
+        inputs_train, outputs_train = final_model.get_inputs_outputs_fancy(
+            train_loader, student_aggregation_mode
+        )
 
         per_layer_datasets = {
             key: torch.utils.data.TensorDataset(
@@ -481,10 +625,11 @@ class BronzeAgeGNN(torch.nn.Module):
         layer_dict = {}
         config.nonlinearity = None
         config.evaluation_nonlinearity = None
+        final_model.config.aggregation_mode = student_aggregation_mode
+        config.aggregation_mode = student_aggregation_mode
         for key in inputs_train.keys():
-            module = final_model.get_submodule(key)
-            out_channels = module.out_channels
-            in_channels = module.in_channels
+            out_channels = final_model.get_submodule(key).out_channels
+            in_channels = inputs_train[key].shape[-1]
 
             new_module = BronzeAgeLayer(
                 in_channels,

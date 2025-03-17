@@ -459,12 +459,12 @@ def get_config_for_dataset(dataset, **kwargs):
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
         "train_decision_tree": False,
-        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "aggregation_mode": AggregationMode.STONE_AGE,
         "num_recurrent_iterations": NUM_ITERATIONS.get(dataset, 1),
         "teacher_max_epochs": 15,
         "train_concept_model": True,
         "student_layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
-        "student_aggregation_mode": None,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
     }
     config.update(kwargs)
     return Config(**config)
