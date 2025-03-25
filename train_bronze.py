@@ -291,6 +291,9 @@ def train(config: Config):
                 class_weights=class_weights,
                 suffix="_dt",
             )
+            # save the decision tree model
+            tree_model_path = Path(logger.log_dir) / "checkpoints" / f"decision_tree_model.pt"
+            torch.save(tree_model, tree_model_path)
             test_accuracy_dt = trainer.test(
                 wrapped_tree_model, test_loader, verbose=False
             )[0]["test_acc_dt"]
@@ -319,6 +322,8 @@ def train(config: Config):
                 class_weights=class_weights,
                 suffix="_dt_pruned",
             )
+            pruned_tree_model_path = Path(logger.log_dir) / "checkpoints" / f"pruned_decision_tree_model.pt"
+            torch.save(pruned_tree_model, pruned_tree_model_path)
             test_accuracy_dt_pruned = trainer.test(
                 wrapped_pruned_model, test_loader, verbose=False
             )[0]["test_acc_dt_pruned"]
@@ -336,6 +341,8 @@ def train(config: Config):
                 class_weights=class_weights,
                 suffix="_cm",
             )
+            concept_model_path = Path(logger.log_dir) / "checkpoints" / f"concept_model.pt"
+            torch.save(concept_model, concept_model_path)
             test_accuracy_cm = trainer.test(
                 wrapped_concept_model, test_loader, verbose=False
             )[0]["test_acc_cm"]
@@ -377,6 +384,8 @@ def train(config: Config):
         np.std(test_accuracies),
         np.mean(test_accuracies_dt),
         np.std(test_accuracies_dt),
+        np.mean(test_accuracies_dt_pruned),
+        np.std(test_accuracies_dt_pruned),
     )
 
 
@@ -442,7 +451,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "use_batch_norm": True,
         "hidden_units": 16,
         "skip_connection": True,
-        "bounding_parameter": 10,
+        "bounding_parameter": 1000,
         "batch_size": 128,
         "learning_rate": 0.01,
         "max_epochs": 1500,
@@ -458,8 +467,8 @@ def get_config_for_dataset(dataset, **kwargs):
         "entropy_loss_scaling": 0.0,
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
-        "train_decision_tree": False,
-        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "train_decision_tree": True,
+        "aggregation_mode": AggregationMode.STONE_AGE,
         "num_recurrent_iterations": NUM_ITERATIONS.get(dataset, 1),
         "teacher_max_epochs": 15,
         "train_concept_model": True,
@@ -472,11 +481,13 @@ def get_config_for_dataset(dataset, **kwargs):
 
 def store_results(results, filename="results.csv", filename2="results2.csv"):
     df = pd.DataFrame(results).T
-    df.columns = ["success", "mean_acc", "std_acc", "mean_acc_dt", "std_acc_dt"]
+    df.columns = ["success", "mean_acc", "std_acc", "mean_acc_dt", "std_acc_dt", "mean_acc_dt_pruned", "std_acc_dt_pruned"]
 
     df.success = df.success.replace({True: "✅", False: "🛑"})
     df["uses_mask"] = df.index.map(lambda x: x.uses_mask)
     df["uses_pooling"] = df.index.map(lambda x: x.uses_pooling)
+    df.to_csv(filename)
+    
     df2 = df[["success", "uses_mask", "uses_pooling"]].copy()
 
     df2["GNN"] = (
@@ -484,7 +495,6 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
         + " ± "
         + df["std_acc"].map("{:.2f}".format, na_action="ignore")
     )
-    df.to_csv(filename)
     df2["DT"] = (
         df["mean_acc_dt"].fillna(-1).map("{:.2f}".format, na_action="ignore")
         + " ± "
@@ -492,6 +502,12 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
     )
     df2.loc[df["mean_acc_dt"].isna(), "DT"] = "N/A"
 
+    df2["DT pruned"] = (
+        df["mean_acc_dt_pruned"].fillna(-1).map("{:.2f}".format, na_action="ignore")
+        + " ± "
+        + df["std_acc_dt_pruned"].fillna(-1).map("{:.2f}".format, na_action="ignore")
+    )
+    df2.loc[df["mean_acc_dt_pruned"].isna(), "DT pruned"] = "N/A"
     df2.to_csv(filename2)
 
     print(df2)
@@ -515,7 +531,7 @@ if __name__ == "__main__":
         DatasetEnum.COLLAB,
     ]
     # datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
-    datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
+    #datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
         for dataset_, (
@@ -524,13 +540,15 @@ if __name__ == "__main__":
             std_acc,
             mean_acc_dt,
             std_acc_dt,
+            mean_acc_dt_pruned,
+            std_acc_dt_pruned,
         ) in results.items():
             store_results(
                 results, filename="results_temp.csv", filename2="results2_temp.csv"
             )
             if success:
                 print(
-                    f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}"
+                    f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}, DT pruned {mean_acc_dt_pruned:.2f} ± {std_acc_dt_pruned:.2f}"
                 )
             else:
                 print(f"🛑 {dataset_}")
@@ -538,11 +556,11 @@ if __name__ == "__main__":
         try:
             config = get_config_for_dataset(dataset)
             lightning.seed_everything(0)
-            mean_acc, std_acc, mean_acc_dt, std_acc_dt = train(config)
-            results[dataset] = (True, mean_acc, std_acc, mean_acc_dt, std_acc_dt)
+            mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned = train(config)
+            results[dataset] = (True, mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned)
         except Exception as e:
             print(f"Error with dataset {dataset}: {e}")
-            results[dataset] = (False, None, None, None, None)
+            results[dataset] = (False, None, None, None, None, None, None)
             raise e
 
     for dataset_, (

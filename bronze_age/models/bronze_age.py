@@ -564,10 +564,10 @@ class BronzeAgeGNN(torch.nn.Module):
             if isinstance(module, BronzeAgeDecisionTree):
                 trees[name] = module.tree
 
-        for tree_name, tree in trees.items():
+        """for tree_name, tree in trees.items():
             print(f"Tree {tree_name}")
             print(sktree.export_text(tree))
-        print()
+        print()"""
 
         traversal_order = get_traversal_order(trees)
 
@@ -591,7 +591,7 @@ class BronzeAgeGNN(torch.nn.Module):
                 and score_after_train >= score_before_val
             ):
                 to_prune.append((tree_name, node_id))
-                print(f"Pruned node {node_id} in {tree_name}")
+                #print(f"Pruned node {node_id} in {tree_name}")
             else:
                 trees[tree_name] = original_tree
                 decision_tree_model.update_trees(trees)
