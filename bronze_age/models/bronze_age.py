@@ -606,4 +606,4 @@ class BronzeAgeGNN(torch.nn.Module):
             print(sktree.export_text(tree))
         print()
 
-        return decision_tree_model, len(to_prune)
+        return decision_tree_model, len(to_prune), len(traversal_order) - len(to_prune)

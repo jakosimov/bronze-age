@@ -312,7 +312,7 @@ def train(config: Config):
                     "test_acc_dt_while_pruning"
                 ]
 
-            pruned_tree_model, num_nodes_pruned = tree_model.prune_decision_trees(
+            pruned_tree_model, num_nodes_pruned, num_nodes_remaining = tree_model.prune_decision_trees(
                 train_loader_test, val_loader, score_model
             )
             wrapped_pruned_model = LightningModel(
@@ -355,7 +355,7 @@ def train(config: Config):
         print(f"Test accuracy: {test_accuracy}")
         if config.train_decision_tree:
             print(f"Test accuracy DT: {test_accuracy_dt}")
-            print(f"Test accuracy DT pruned: {test_accuracy_dt_pruned}")
+            print(f"Test accuracy DT pruned ({num_nodes_remaining} nodes): {test_accuracy_dt_pruned}")
         if config.train_concept_model:
             print(f"Test accuracy CM: {test_accuracy_cm}")
         print(f"=====================")
@@ -471,7 +471,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "aggregation_mode": AggregationMode.STONE_AGE,
         "num_recurrent_iterations": NUM_ITERATIONS.get(dataset, 1),
         "teacher_max_epochs": 15,
-        "train_concept_model": True,
+        "train_concept_model": False,
         "student_layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
         "student_aggregation_mode": None,
     }
@@ -529,6 +529,13 @@ if __name__ == "__main__":
         DatasetEnum.IMDB_BINARY,
         DatasetEnum.REDDIT_BINARY,
         DatasetEnum.COLLAB,
+        # Algorithmic dataset
+        DatasetEnum.DISTANCE,
+        DatasetEnum.PATH_FINDING,
+        DatasetEnum.PREFIX_SUM,
+        DatasetEnum.ROOT_VALUE,
+        DatasetEnum.GAME_OF_LIFE,
+        DatasetEnum.HEXAGONAL_GAME_OF_LIFE,
     ]
     # datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
     #datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
@@ -561,7 +568,8 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error with dataset {dataset}: {e}")
             results[dataset] = (False, None, None, None, None, None, None)
-            raise e
+            import traceback
+            traceback.print_exc()
 
     for dataset_, (
         success,
