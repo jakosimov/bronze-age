@@ -113,4 +113,4 @@ class BronzeConfig:
     train_concept_model: bool = False
     student_layer_type: LayerTypeBronze = LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER
     student_aggregation_mode: AggregationMode | None = None
-    concept_memory_disjunctions: int = 2
+    concept_memory_disjunctions: int = 4
