@@ -577,6 +577,8 @@ if __name__ == "__main__":
         std_acc,
         mean_acc_dt,
         std_acc_dt,
+        mean_acc_dt_pruned,
+        std_acc_dt_pruned,
     ) in results.items():
         if success:
             print(
