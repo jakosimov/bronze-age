@@ -115,10 +115,6 @@ class LightningModel(lightning.LightningModule):
         if self.config.dataset.uses_mask:
             y_hat = y_hat[batch.train_mask]
             y = y[batch.train_mask]
-        entropies = {
-            f"train_entropy_loss_{layer}": torch.sum(entropy) / y.size(0)
-            for layer, entropy in entropies.items()
-        }
         for key, value in entropies.items():
             self.log(
                 f"key{self.suffix}",
@@ -148,7 +144,7 @@ class LightningModel(lightning.LightningModule):
         return final_loss
 
     def validation_step(self, batch, batch_idx):
-        y_hat, _, _ = self.model(
+        y_hat, entropies, _ = self.model(
             x=batch.x,
             edge_index=batch.edge_index,
             batch=batch.batch,
@@ -163,13 +159,21 @@ class LightningModel(lightning.LightningModule):
             if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
             else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
-        self.log(f"val_loss{self.suffix}", loss, batch_size=y.size(0), on_epoch=True)
+        entropy_loss = torch.stack(list(entropies.values())).sum()
+        loss = (
+            _binary_cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
+            if self.config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
+            else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
+        )
+        final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
+        
+        self.log(f"val_loss{self.suffix}", final_loss, batch_size=y.size(0), on_epoch=True)
 
         self.val_accuracy(y_hat, y)
         self.log(
             f"val_acc{self.suffix}", self.val_accuracy, on_step=False, on_epoch=True
         )
-        return loss
+        return final_loss
 
     def test_step(self, batch, batch_idx):
         y_hat, _, explanations = self.model(
@@ -444,36 +448,40 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.GAME_OF_LIFE: 1,
         DatasetEnum.HEXAGONAL_GAME_OF_LIFE: 1,
     }
+    BATCH_SIZES = {
+        DatasetEnum.SATURATION : 1,
+    }
     config = {
         "data_dir": "downloads",
         "temperature": 1.0,
         "dropout": 0.0,
         "use_batch_norm": True,
         "hidden_units": 16,
-        "skip_connection": True,
-        "bounding_parameter": 1000,
-        "batch_size": 128,
+        "skip_connection": False,
+        "bounding_parameter": 10,
+        "batch_size": BATCH_SIZES.get(dataset, 128),
         "learning_rate": 0.01,
         "max_epochs": 1500,
         "num_cv": 10,
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.MLP,
-        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
-        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
-        "concept_embedding_size": 128,
-        "concept_temperature": 0.1,
-        "entropy_loss_scaling": 0.0,
+        "layer_type": LayerType.DEEP_CONCEPT_REASONER,
+        "nonlinearity": None,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "concept_embedding_size": 16,
+        "concept_temperature": 0.5,
+        "entropy_loss_scaling": 0.1,
         "early_stopping": True,
-        "loss_mode": LossMode.CROSS_ENTROPY,
-        "train_decision_tree": True,
-        "aggregation_mode": AggregationMode.STONE_AGE,
+        "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.BRONZE_AGE,
         "num_recurrent_iterations": NUM_ITERATIONS.get(dataset, 1),
         "teacher_max_epochs": 15,
         "train_concept_model": False,
         "student_layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
         "student_aggregation_mode": None,
+        "concept_memory_disjunctions": 4,
     }
     config.update(kwargs)
     return Config(**config)
@@ -522,13 +530,14 @@ if __name__ == "__main__":
         DatasetEnum.TREE_CYCLE,
         DatasetEnum.TREE_GRID,
         DatasetEnum.BA_2MOTIFS,
-        DatasetEnum.MUTAG,
-        DatasetEnum.MUTAGENICITY,
-        DatasetEnum.BBBP,
-        DatasetEnum.PROTEINS,
-        DatasetEnum.IMDB_BINARY,
-        DatasetEnum.REDDIT_BINARY,
-        DatasetEnum.COLLAB,
+        # Real-world datasets
+        # DatasetEnum.MUTAG,
+        # DatasetEnum.MUTAGENICITY,
+        # DatasetEnum.BBBP,
+        # DatasetEnum.PROTEINS,
+        # DatasetEnum.IMDB_BINARY,
+        # DatasetEnum.REDDIT_BINARY,
+        # DatasetEnum.COLLAB,
         # Algorithmic dataset
         DatasetEnum.DISTANCE,
         DatasetEnum.PATH_FINDING,
@@ -537,7 +546,8 @@ if __name__ == "__main__":
         DatasetEnum.GAME_OF_LIFE,
         DatasetEnum.HEXAGONAL_GAME_OF_LIFE,
     ]
-    # datasets = [DatasetEnum.SIMPLE_SATURATION] + datasets
+
+    datasets = [DatasetEnum.SIMPLE_SATURATION] #+ datasets
     #datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
@@ -570,6 +580,7 @@ if __name__ == "__main__":
             results[dataset] = (False, None, None, None, None, None, None)
             import traceback
             traceback.print_exc()
+            raise e
 
     for dataset_, (
         success,
