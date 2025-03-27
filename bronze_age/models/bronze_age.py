@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import torch.utils
 import torch.utils.data
 from lightning.pytorch import loggers as pl_loggers
+from lightning.pytorch.callbacks import EarlyStopping
 from sklearn.tree import DecisionTreeClassifier
 from torch_geometric.nn import MessagePassing, global_add_pool
 
@@ -41,8 +42,7 @@ def _global_add_pool_with_transformation(x, batch, config):
         AggregationMode.BRONZE_AGE_ROUNDED,
     ]:
         _Y_range = torch.arange(config.bounding_parameter).float()
-        states = F.elu(clamped_sum[..., None] - _Y_range) - 0.5
-        states = F.sigmoid(config.a * states)
+        states = F.sigmoid(config.a*(clamped_sum[..., None] - _Y_range - 0.5) )
         states = states.view(*states.shape[:-2], -1)
         if config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
             states = states + states.detach().round().float() - states.detach()
@@ -534,11 +534,19 @@ class BronzeAgeGNN(torch.nn.Module):
         logger = pl_loggers.TensorBoardLogger(
             save_dir="lightning_logs", name=experiment_title + " concept_trainer"
         )
+        
+        early_stopping = EarlyStopping(
+            monitor="train_loss_trainer_teacher",
+            patience=2,
+            stopping_threshold=0.001,
+            mode="min",
+        )
         trainer = lightning.Trainer(
             max_epochs=config.teacher_max_epochs,
             log_every_n_steps=1,
             enable_progress_bar=False,
             logger=logger,
+            callbacks=[early_stopping],
         )
 
         trainer.fit(trainer_model, train_data_loader)

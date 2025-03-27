@@ -390,6 +390,8 @@ def train(config: Config):
         np.std(test_accuracies_dt),
         np.mean(test_accuracies_dt_pruned),
         np.std(test_accuracies_dt_pruned),
+        np.mean(test_accuracies_cm),
+        np.std(test_accuracies_cm),
     )
 
 
@@ -457,7 +459,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "dropout": 0.0,
         "use_batch_norm": True,
         "hidden_units": 16,
-        "skip_connection": False,
+        "skip_connection": True,
         "bounding_parameter": 10,
         "batch_size": BATCH_SIZES.get(dataset, 128),
         "learning_rate": 0.01,
@@ -466,22 +468,22 @@ def get_config_for_dataset(dataset, **kwargs):
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.DEEP_CONCEPT_REASONER,
-        "nonlinearity": None,
-        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "layer_type": LayerType.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
         "concept_embedding_size": 16,
-        "concept_temperature": 0.5,
-        "entropy_loss_scaling": 0.1,
+        "concept_temperature": 0.1,
+        "entropy_loss_scaling": 0.0,
         "early_stopping": True,
-        "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
-        "train_decision_tree": False,
-        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "loss_mode": LossMode.CROSS_ENTROPY,
+        "train_decision_tree": True,
+        "aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
         "num_recurrent_iterations": NUM_ITERATIONS.get(dataset, 1),
         "teacher_max_epochs": 15,
-        "train_concept_model": False,
-        "student_layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
+        "train_concept_model": True,
+        "student_layer_type": LayerType.DEEP_CONCEPT_REASONER,
         "student_aggregation_mode": None,
-        "concept_memory_disjunctions": 4,
+        "concept_memory_disjunctions": 2,
     }
     config.update(kwargs)
     return Config(**config)
@@ -489,7 +491,7 @@ def get_config_for_dataset(dataset, **kwargs):
 
 def store_results(results, filename="results.csv", filename2="results2.csv"):
     df = pd.DataFrame(results).T
-    df.columns = ["success", "mean_acc", "std_acc", "mean_acc_dt", "std_acc_dt", "mean_acc_dt_pruned", "std_acc_dt_pruned"]
+    df.columns = ["success", "mean_acc", "std_acc", "mean_acc_dt", "std_acc_dt", "mean_acc_dt_pruned", "std_acc_dt_pruned", "mean_acc_cm", "std_acc_cm"]
 
     df.success = df.success.replace({True: "✅", False: "🛑"})
     df["uses_mask"] = df.index.map(lambda x: x.uses_mask)
@@ -516,6 +518,13 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
         + df["std_acc_dt_pruned"].fillna(-1).map("{:.2f}".format, na_action="ignore")
     )
     df2.loc[df["mean_acc_dt_pruned"].isna(), "DT pruned"] = "N/A"
+
+    df2["CM"] = (
+        df["mean_acc_cm"].fillna(-1).map("{:.2f}".format, na_action="ignore")
+        + " ± "
+        + df["std_acc_cm"].fillna(-1).map("{:.2f}".format, na_action="ignore")
+    )
+    df2.loc[df["mean_acc_cm"].isna(), "CM"] = "N/A"
     df2.to_csv(filename2)
 
     print(df2)
@@ -524,20 +533,12 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
 if __name__ == "__main__":
     results = {}
     datasets = [
-        DatasetEnum.INFECTION,
-        DatasetEnum.SATURATION,
+        #DatasetEnum.INFECTION,
+        #DatasetEnum.SATURATION,
         DatasetEnum.BA_SHAPES,
         DatasetEnum.TREE_CYCLE,
         DatasetEnum.TREE_GRID,
         DatasetEnum.BA_2MOTIFS,
-        # Real-world datasets
-        # DatasetEnum.MUTAG,
-        # DatasetEnum.MUTAGENICITY,
-        # DatasetEnum.BBBP,
-        # DatasetEnum.PROTEINS,
-        # DatasetEnum.IMDB_BINARY,
-        # DatasetEnum.REDDIT_BINARY,
-        # DatasetEnum.COLLAB,
         # Algorithmic dataset
         DatasetEnum.DISTANCE,
         DatasetEnum.PATH_FINDING,
@@ -545,9 +546,18 @@ if __name__ == "__main__":
         DatasetEnum.ROOT_VALUE,
         DatasetEnum.GAME_OF_LIFE,
         DatasetEnum.HEXAGONAL_GAME_OF_LIFE,
+        # Real-world datasets
+        DatasetEnum.MUTAG,
+        DatasetEnum.MUTAGENICITY,
+        DatasetEnum.BBBP,
+        DatasetEnum.PROTEINS,
+        DatasetEnum.IMDB_BINARY,
+        DatasetEnum.REDDIT_BINARY,
+        DatasetEnum.COLLAB,
+        
     ]
 
-    datasets = [DatasetEnum.SIMPLE_SATURATION] #+ datasets
+    #datasets = [DatasetEnum.SIMPLE_SATURATION] #+ datasets
     #datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
@@ -559,13 +569,15 @@ if __name__ == "__main__":
             std_acc_dt,
             mean_acc_dt_pruned,
             std_acc_dt_pruned,
+            mean_acc_cm,
+            std_acc_cm,
         ) in results.items():
             store_results(
                 results, filename="results_temp.csv", filename2="results2_temp.csv"
             )
             if success:
                 print(
-                    f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}, DT pruned {mean_acc_dt_pruned:.2f} ± {std_acc_dt_pruned:.2f}"
+                    f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}, DT pruned {mean_acc_dt_pruned:.2f} ± {std_acc_dt_pruned:.2f}, CM {mean_acc_cm:.2f} ± {std_acc_cm:.2f}"
                 )
             else:
                 print(f"🛑 {dataset_}")
@@ -573,14 +585,14 @@ if __name__ == "__main__":
         try:
             config = get_config_for_dataset(dataset)
             lightning.seed_everything(0)
-            mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned = train(config)
-            results[dataset] = (True, mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned)
+            mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned, mean_acc_cm, std_acc_cm = train(config)
+            results[dataset] = (True, mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned, mean_acc_cm, std_acc_cm)
         except Exception as e:
             print(f"Error with dataset {dataset}: {e}")
-            results[dataset] = (False, None, None, None, None, None, None)
+            results[dataset] = (False, None, None, None, None, None, None, None, None)
             import traceback
             traceback.print_exc()
-            raise e
+            #raise e
 
     for dataset_, (
         success,
@@ -590,10 +602,12 @@ if __name__ == "__main__":
         std_acc_dt,
         mean_acc_dt_pruned,
         std_acc_dt_pruned,
+        mean_acc_cm,
+        std_acc_cm,
     ) in results.items():
         if success:
             print(
-                f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}"
+                f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}, DT pruned {mean_acc_dt_pruned:.2f} ± {std_acc_dt_pruned:.2f}, CM {mean_acc_cm:.2f} ± {std_acc_cm:.2f}"
             )
         else:
             print(f"🛑 {dataset_}")
