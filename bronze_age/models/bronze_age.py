@@ -31,6 +31,23 @@ from bronze_age.models.prune_tree import (
 from bronze_age.models.util import DifferentiableArgmax, GumbelSoftmax
 
 
+def _global_add_pool_with_transformation(x, batch, config):
+    message_sums = global_add_pool(x, batch)
+    clamped_sum = torch.clamp(message_sums, min=0, max=config.bounding_parameter)
+    if config.aggregation_mode == AggregationMode.STONE_AGE:
+        return clamped_sum
+    elif config.aggregation_mode in [
+        AggregationMode.BRONZE_AGE,
+        AggregationMode.BRONZE_AGE_ROUNDED,
+    ]:
+        _Y_range = torch.arange(config.bounding_parameter).float()
+        states = F.elu(clamped_sum[..., None] - _Y_range) - 0.5
+        states = F.sigmoid(config.a * states)
+        states = states.view(*states.shape[:-2], -1)
+        if config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
+            states = states + states.detach().round().float() - states.detach()
+        return states
+
 class MLP(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, num_layers, dropout):
         super(MLP, self).__init__()
@@ -241,9 +258,8 @@ class ConceptReasonerTrainerModule(lightning.LightningModule):
 
         y_hat = self(x)
         loss = 0
-        for key in y.keys():
-            loss += _binary_cross_entropy_loss(y_hat[key], y[key], class_weights=None)
-        loss = loss / len(y)
+        loss = {key: _binary_cross_entropy_loss(y_hat[key], y[key], class_weights=None) for key in y.keys()}
+        loss = sum(loss.values()) / len(y)
         self.log(
             "train_loss_trainer_teacher",
             loss,
@@ -376,6 +392,13 @@ class BronzeAgeGNN(torch.nn.Module):
             and config.loss_mode == LossMode.BINARY_CROSS_ENTROPY
         ):
             final_non_linearity = nn.Sigmoid()
+        if self.use_pooling and config.aggregation_mode in [
+            AggregationMode.BRONZE_AGE,
+            AggregationMode.BRONZE_AGE_ROUNDED,
+        ]:
+            self.bounding_parameter = config.bounding_parameter
+            self.register_buffer("_Y_range", torch.arange(self.bounding_parameter).float())
+            final_layer_inputs = final_layer_inputs * self.bounding_parameter
         self.output = BronzeAgeLayer(
             final_layer_inputs,
             out_channels,
@@ -411,8 +434,8 @@ class BronzeAgeGNN(torch.nn.Module):
                 xs.append(x)
 
         if self.use_pooling:
-            x = global_add_pool(x, batch)
-            xs = [global_add_pool(xi, batch) for xi in xs]
+            x = _global_add_pool_with_transformation(x, batch, self.config)
+            xs = [_global_add_pool_with_transformation(xi, batch, self.config) for xi in xs]
         if self.skip_connection:
             x = torch.cat(xs, dim=1)
 
@@ -458,7 +481,20 @@ class BronzeAgeGNN(torch.nn.Module):
         for key in inputs_train.keys():
             inputs_train[key] = np.concatenate(inputs_train[key])
             outputs_train[key] = np.concatenate(outputs_train[key])
-
+        if len(inputs_train["output"]) < len(inputs_train["input"]):
+            # this is a hack to make sure that the output has the same number of samples as the input
+            # we simply repeat the output dataset until it has the same number of samples as the input
+            # this is necessary when pooling
+            num_repeats = (len(inputs_train["input"]) // len(inputs_train["output"])) + 1
+            inputs_train["output"] = np.tile(inputs_train["output"], (num_repeats, 1))[
+                : len(inputs_train["input"])
+            ]
+            outputs_train["output"] = np.tile(outputs_train["output"], (num_repeats))[
+                : len(inputs_train["input"])
+            ]
+        print("!!!")
+        print(inputs_train["input"])
+        print(outputs_train["input"])
         return inputs_train, outputs_train
 
     def train_concept_model(self, train_loader, experiment_title=""):
@@ -466,21 +502,19 @@ class BronzeAgeGNN(torch.nn.Module):
         config = deepcopy(self.config)
 
         inputs_train, outputs_train = final_model.get_inputs_outputs(train_loader)
-
         per_layer_datasets = {
             key: torch.utils.data.TensorDataset(
                 torch.tensor(inputs_train[key]), torch.tensor(outputs_train[key])
             )
             for key in inputs_train.keys()
         }
-
         stack_dataset = torch.utils.data.StackDataset(**per_layer_datasets)
         train_data_loader = torch.utils.data.DataLoader(
             stack_dataset, batch_size=final_model.config.batch_size, shuffle=True
         )
         layer_dict = {}
         config.nonlinearity = None
-        config.evaluation_nonlinearity = None
+        config.evaluation_nonlinearity = NonLinearity.DIFFERENTIABLE_ARGMAX
         for key in inputs_train.keys():
             module = final_model.get_submodule(key)
             out_channels = module.out_channels
@@ -517,7 +551,6 @@ class BronzeAgeGNN(torch.nn.Module):
     def to_decision_tree(self, train_loader):
         decision_tree = deepcopy(self)
         inputs_train, outputs_train = decision_tree.get_inputs_outputs(train_loader)
-
         for key in inputs_train.keys():
             out_channels = decision_tree.get_submodule(key).out_channels
             use_linear_feature_combinations = not (
