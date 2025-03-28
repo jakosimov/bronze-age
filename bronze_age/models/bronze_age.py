@@ -40,12 +40,19 @@ def _global_add_pool_with_transformation(x, batch, config):
     elif config.aggregation_mode in [
         AggregationMode.BRONZE_AGE,
         AggregationMode.BRONZE_AGE_ROUNDED,
+        AggregationMode.BRONZE_AGE_COMPARISON,
     ]:
         _Y_range = torch.arange(config.bounding_parameter).float()
         states = F.sigmoid(config.a*(clamped_sum[..., None] - _Y_range - 0.5) )
         states = states.view(*states.shape[:-2], -1)
         if config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
             states = states + states.detach().round().float() - states.detach()
+        if config.aggregation_mode == AggregationMode.BRONZE_AGE_COMPARISON:
+            neighbors_difference = F.sigmoid(config.a*(clamped_sum[..., :, None] - clamped_sum[..., None, :] - 0.5))
+            neighbors_difference = neighbors_difference[
+                :, ~np.eye(neighbors_difference.shape[-1], dtype=bool)
+            ].reshape(neighbors_difference.shape[0], -1)
+            states = torch.cat((states, neighbors_difference), dim=-1)
         return states
 
 class MLP(torch.nn.Module):
@@ -175,11 +182,26 @@ class BronzeAgeDecisionTree(nn.Module):
         self.out_channels = out_channels
 
     @staticmethod
-    def _preprocess_features(x, num_states, use_linear_feature_combinations=False):
-        if use_linear_feature_combinations:
+    def _preprocess_features(x, num_states, config, use_linear_feature_combinations=False):
+        if use_linear_feature_combinations and config.aggregation_mode != AggregationMode.BRONZE_AGE_COMPARISON:
             current_state = x[..., :num_states]
             neighbors = x[..., num_states:]
-            neighbors_difference = neighbors[..., :, None] > neighbors[..., None, :]
+            if config.aggregation_mode == AggregationMode.STONE_AGE:
+                neighbors_numerical = x[..., num_states:]
+            elif config.aggregation_mode in [
+                AggregationMode.BRONZE_AGE,
+                AggregationMode.BRONZE_AGE_ROUNDED,
+            ]:
+                bronze_aggregation = x[..., num_states:].reshape(
+                    x.shape[0], -1, config.bounding_parameter
+                    ) > 0.5
+                is_zero = bronze_aggregation.sum(axis=-1) == 0
+
+                neighbors_numerical = bronze_aggregation[::-1].argmax(axis=-1)
+                neighbors_numerical = (config.bounding_parameter - neighbors_numerical)
+                neighbors_numerical[is_zero] = 0
+
+            neighbors_difference = neighbors_numerical[..., :, None] > neighbors_numerical[..., None, :]
             # remove diagonal and flatten rest
             neighbors_difference = neighbors_difference[
                 :, ~np.eye(neighbors_difference.shape[-1], dtype=bool)
@@ -203,7 +225,7 @@ class BronzeAgeDecisionTree(nn.Module):
             random_state=0, max_leaf_nodes=config.max_leaf_nodes
         )
         x = BronzeAgeDecisionTree._preprocess_features(
-            x, state_size, use_linear_feature_combinations
+            x, state_size, config, use_linear_feature_combinations
         )
         tree.fit(x, y)
         return BronzeAgeDecisionTree(
@@ -217,7 +239,7 @@ class BronzeAgeDecisionTree(nn.Module):
     def forward(self, x, return_explanation=False, concept_names=None):
         x1 = x.cpu().detach().numpy()
         x1 = self._preprocess_features(
-            x1, self.state_size, self.use_linear_feature_combinations
+            x1, self.state_size, self.config, self.use_linear_feature_combinations
         )
         y = torch.tensor(self.tree.predict(x1)).to(device=x.device, dtype=torch.long)
         return (
@@ -248,7 +270,7 @@ class ConceptReasonerTrainerModule(lightning.LightningModule):
         return {
             key: self.layer_dict[fmt(key)](
                 x,
-            )[0]
+            )
             for key, x in x_dict.items()
         }
 
@@ -256,10 +278,20 @@ class ConceptReasonerTrainerModule(lightning.LightningModule):
         x = {key: x[0] for key, x in batch.items()}
         y = {key: x[1] for key, x in batch.items()}
 
-        y_hat = self(x)
+        res = self(x)
+        y_hat = {k: v[0] for k, v in res.items()}
+        aux_loss = sum(v[1] for v in res.values())
         loss = 0
         loss = {key: _binary_cross_entropy_loss(y_hat[key], y[key], class_weights=None) for key in y.keys()}
         loss = sum(loss.values()) / len(y)
+        final_loss = loss + 0.2 * aux_loss
+        self.log(
+            "train_loss_trainer_aux",
+            aux_loss,
+            on_epoch=True,
+            on_step=False,
+            batch_size=y["input"].size(0),
+        )
         self.log(
             "train_loss_trainer_teacher",
             loss,
@@ -267,7 +299,7 @@ class ConceptReasonerTrainerModule(lightning.LightningModule):
             on_step=False,
             batch_size=y["input"].size(0),
         )
-        return loss
+        return final_loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.config.learning_rate)
@@ -287,13 +319,20 @@ class BronzeAgeGNNLayer(MessagePassing):
         elif config.aggregation_mode in [
             AggregationMode.BRONZE_AGE,
             AggregationMode.BRONZE_AGE_ROUNDED,
+            AggregationMode.BRONZE_AGE_COMPARISON,
         ]:
             bounding_parameter = config.bounding_parameter
             self.register_buffer("_Y_range", torch.arange(bounding_parameter).float())
-
-            self.layer = BronzeAgeLayer(
-                in_channels * (bounding_parameter + 1), out_channels, config
-            )
+            if config.aggregation_mode != AggregationMode.BRONZE_AGE_COMPARISON:
+                self.layer = BronzeAgeLayer(
+                    in_channels * (bounding_parameter + 1), out_channels, config
+                )
+            else:
+                self.layer = BronzeAgeLayer(
+                    in_channels * (bounding_parameter + in_channels),
+                    out_channels,
+                    config,
+                )
         else:
             raise NotImplementedError
 
@@ -314,15 +353,20 @@ class BronzeAgeGNNLayer(MessagePassing):
         elif self.config.aggregation_mode in [
             AggregationMode.BRONZE_AGE,
             AggregationMode.BRONZE_AGE_ROUNDED,
+            AggregationMode.BRONZE_AGE_COMPARISON,
         ]:
             states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
             states = F.sigmoid(self.a * states)
             states = states.view(*states.shape[:-2], -1)
             if self.config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
                 states = states + states.detach().round().float() - states.detach()
+            if self.config.aggregation_mode == AggregationMode.BRONZE_AGE_COMPARISON:
+                neighbors_difference = F.sigmoid(self.config.a*(clamped_sum[..., :, None] - clamped_sum[..., None, :] - 0.5))
+                neighbors_difference = neighbors_difference[
+                    :, ~np.eye(neighbors_difference.shape[-1], dtype=bool)
+                ].reshape(neighbors_difference.shape[0], -1)
+                states = torch.cat((states, neighbors_difference), dim=-1)
             return states
-        else:
-            raise NotImplementedError
 
     def _get_concept_names(self):
         if self.config.aggregation_mode == AggregationMode.STONE_AGE:
@@ -332,12 +376,23 @@ class BronzeAgeGNNLayer(MessagePassing):
         elif self.config.aggregation_mode in [
             AggregationMode.BRONZE_AGE,
             AggregationMode.BRONZE_AGE_ROUNDED,
+            AggregationMode.BRONZE_AGE_COMPARISON,
         ]:
-            return [f"s_{i}" for i in range(self.in_channels)] + [
+            
+            description =  [f"s_{i}" for i in range(self.in_channels)] + [
                 f"s_{i}_count>{j}"
                 for i in range(self.in_channels)
                 for j in range(self.bounding_parameter)
             ]
+            if self.config.aggregation_mode == AggregationMode.BRONZE_AGE_COMPARISON:
+                description += [
+                    f"s_{i}_count>s_{j}_count"
+                    for i in range(self.in_channels)
+                    for j in range(self.in_channels)
+                    if i != j
+                ]
+            return description
+        
 
     def update(self, inputs, x, return_explanation=False):
         combined = torch.cat((x, inputs), 1)
@@ -492,9 +547,6 @@ class BronzeAgeGNN(torch.nn.Module):
             outputs_train["output"] = np.tile(outputs_train["output"], (num_repeats))[
                 : len(inputs_train["input"])
             ]
-        print("!!!")
-        print(inputs_train["input"])
-        print(outputs_train["input"])
         return inputs_train, outputs_train
 
     def train_concept_model(self, train_loader, experiment_title=""):
@@ -510,7 +562,7 @@ class BronzeAgeGNN(torch.nn.Module):
         }
         stack_dataset = torch.utils.data.StackDataset(**per_layer_datasets)
         train_data_loader = torch.utils.data.DataLoader(
-            stack_dataset, batch_size=final_model.config.batch_size, shuffle=True
+            stack_dataset, batch_size=128, shuffle=True
         )
         layer_dict = {}
         config.nonlinearity = None
@@ -544,7 +596,7 @@ class BronzeAgeGNN(torch.nn.Module):
         trainer = lightning.Trainer(
             max_epochs=config.teacher_max_epochs,
             log_every_n_steps=1,
-            enable_progress_bar=False,
+            enable_progress_bar=True,
             logger=logger,
             callbacks=[early_stopping],
         )

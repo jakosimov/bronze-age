@@ -568,7 +568,7 @@ class MemoryBasedReasonerModule(torch.nn.Module):
                     if rule_counts[i, j] > 0:
                         rule_str = " & ".join(rule_strings[(i, j)])
                         explanations[class_name].append(
-                            f"Rule {j}: {rule_str} (Counts: {rule_counts[i, j]})"
+                            {"rule": rule_str, "count": int(rule_counts[i, j].item()), "index": j}
                         )
 
         return preds, aux_loss, explanations
