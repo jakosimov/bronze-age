@@ -185,7 +185,9 @@ class LightningModel(lightning.LightningModule):
         explanation_path = (
             Path(self.loggers[0].log_dir) / f"explanations{self.suffix}.txt"
         )
-        explanation_path.write_text(str(explanations))
+        import json
+
+        explanation_path.write_text(json.dumps(explanations, indent=4))
         # NLL loss
         y = batch.y
         if self.config.dataset.uses_mask:
@@ -471,19 +473,19 @@ def get_config_for_dataset(dataset, **kwargs):
         "layer_type": LayerType.MLP,
         "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
         "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
-        "concept_embedding_size": 16,
+        "concept_embedding_size": 128,
         "concept_temperature": 0.1,
         "entropy_loss_scaling": 0.0,
         "early_stopping": True,
         "loss_mode": LossMode.CROSS_ENTROPY,
         "train_decision_tree": True,
-        "aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "aggregation_mode": AggregationMode.BRONZE_AGE_COMPARISON,
         "num_recurrent_iterations": NUM_ITERATIONS.get(dataset, 1),
         "teacher_max_epochs": 15,
         "train_concept_model": True,
-        "student_layer_type": LayerType.DEEP_CONCEPT_REASONER,
+        "student_layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
         "student_aggregation_mode": None,
-        "concept_memory_disjunctions": 2,
+        "concept_memory_disjunctions": 4,
     }
     config.update(kwargs)
     return Config(**config)
@@ -533,8 +535,8 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
 if __name__ == "__main__":
     results = {}
     datasets = [
-        #DatasetEnum.INFECTION,
-        #DatasetEnum.SATURATION,
+        DatasetEnum.INFECTION,
+        DatasetEnum.SATURATION,
         DatasetEnum.BA_SHAPES,
         DatasetEnum.TREE_CYCLE,
         DatasetEnum.TREE_GRID,
@@ -557,7 +559,7 @@ if __name__ == "__main__":
         
     ]
 
-    #datasets = [DatasetEnum.SIMPLE_SATURATION] #+ datasets
+    datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.SATURATION] #+ datasets
     #datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
@@ -584,7 +586,7 @@ if __name__ == "__main__":
         print("Running dataset:", dataset)
         try:
             config = get_config_for_dataset(dataset)
-            lightning.seed_everything(0)
+            lightning.seed_everything(0, workers=True)
             mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned, mean_acc_cm, std_acc_cm = train(config)
             results[dataset] = (True, mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned, mean_acc_cm, std_acc_cm)
         except Exception as e:

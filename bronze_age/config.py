@@ -67,6 +67,7 @@ class AggregationMode(StrEnum):
     STONE_AGE = "stone_age"
     BRONZE_AGE = "bronze_age"
     BRONZE_AGE_ROUNDED = "bronze_age_rounded"
+    BRONZE_AGE_COMPARISON = "bronze_age_comparison"
 
 
 class NonLinearity(StrEnum):
