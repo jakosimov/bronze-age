@@ -239,10 +239,10 @@ def train(config: Config):
         )
 
         early_stopping = EarlyStopping(
-            monitor="val_loss", min_delta=0.00, patience=100, verbose=False, mode="min"
+            monitor="val_loss", min_delta=0.00, patience=100, verbose=False, mode="min", stopping_threshold=0.001
         )
         checkpoint_callback = ModelCheckpoint(
-            save_top_k=1, monitor="val_loss", mode="min"
+            save_top_k=1, monitor="val_acc", mode="max"
         )
 
         class_weights = get_class_weights(
@@ -470,19 +470,19 @@ def get_config_for_dataset(dataset, **kwargs):
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.MLP,
-        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
-        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
+        "nonlinearity": None,
+        "evaluation_nonlinearity": None,
         "concept_embedding_size": 128,
         "concept_temperature": 0.1,
-        "entropy_loss_scaling": 0.0,
+        "entropy_loss_scaling": 0.2,
         "early_stopping": True,
-        "loss_mode": LossMode.CROSS_ENTROPY,
-        "train_decision_tree": True,
+        "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
+        "train_decision_tree": False,
         "aggregation_mode": AggregationMode.BRONZE_AGE_COMPARISON,
         "num_recurrent_iterations": NUM_ITERATIONS.get(dataset, 1),
         "teacher_max_epochs": 15,
-        "train_concept_model": True,
+        "train_concept_model": False,
         "student_layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
         "student_aggregation_mode": None,
         "concept_memory_disjunctions": 4,
