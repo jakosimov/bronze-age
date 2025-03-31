@@ -187,7 +187,9 @@ class LightningModel(lightning.LightningModule):
         explanation_path = (
             Path(self.loggers[0].log_dir) / f"explanations{self.suffix}.txt"
         )
-        explanation_path.write_text(str(explanations))
+        import json
+
+        explanation_path.write_text(json.dumps(explanations, indent=4))
         # NLL loss
         y = batch.y
         if self.config.dataset.uses_mask:
@@ -239,10 +241,15 @@ def train(config: Config):
         )
 
         early_stopping = EarlyStopping(
-            monitor="val_loss", min_delta=0.00, patience=100, verbose=False, mode="min"
+            monitor="val_loss",
+            min_delta=0.00,
+            patience=100,
+            verbose=False,
+            mode="min",
+            stopping_threshold=0.001,
         )
         checkpoint_callback = ModelCheckpoint(
-            save_top_k=1, monitor="val_loss", mode="min"
+            save_top_k=1, monitor="val_acc", mode="max"
         )
 
         class_weights = get_class_weights(
@@ -402,6 +409,8 @@ def train(config: Config):
         np.std(test_accuracies_dt),
         np.mean(test_accuracies_dt_pruned),
         np.std(test_accuracies_dt_pruned),
+        np.mean(test_accuracies_cm),
+        np.std(test_accuracies_cm),
     )
 
 
@@ -469,7 +478,7 @@ def get_config_for_dataset(dataset, **kwargs):
         "dropout": 0.0,
         "use_batch_norm": True,
         "hidden_units": 16,
-        "skip_connection": False,
+        "skip_connection": True,
         "bounding_parameter": 10,
         "batch_size": BATCH_SIZES.get(dataset, 128),
         "learning_rate": 0.01,
@@ -478,12 +487,12 @@ def get_config_for_dataset(dataset, **kwargs):
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.DEEP_CONCEPT_REASONER,
+        "layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
         "nonlinearity": None,
-        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
-        "concept_embedding_size": 16,
-        "concept_temperature": 0.5,
-        "entropy_loss_scaling": 0.1,
+        "evaluation_nonlinearity": None,
+        "concept_embedding_size": 128,
+        "concept_temperature": 0.1,
+        "entropy_loss_scaling": 0.2,
         "early_stopping": True,
         "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
         "train_decision_tree": False,
@@ -509,6 +518,8 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
         "std_acc_dt",
         "mean_acc_dt_pruned",
         "std_acc_dt_pruned",
+        "mean_acc_cm",
+        "std_acc_cm",
     ]
 
     df.success = df.success.replace({True: "✅", False: "🛑"})
@@ -536,6 +547,13 @@ def store_results(results, filename="results.csv", filename2="results2.csv"):
         + df["std_acc_dt_pruned"].fillna(-1).map("{:.2f}".format, na_action="ignore")
     )
     df2.loc[df["mean_acc_dt_pruned"].isna(), "DT pruned"] = "N/A"
+
+    df2["CM"] = (
+        df["mean_acc_cm"].fillna(-1).map("{:.2f}".format, na_action="ignore")
+        + " ± "
+        + df["std_acc_cm"].fillna(-1).map("{:.2f}".format, na_action="ignore")
+    )
+    df2.loc[df["mean_acc_cm"].isna(), "CM"] = "N/A"
     df2.to_csv(filename2)
 
     print(df2)
@@ -550,14 +568,6 @@ if __name__ == "__main__":
         DatasetEnum.TREE_CYCLE,
         DatasetEnum.TREE_GRID,
         DatasetEnum.BA_2MOTIFS,
-        # Real-world datasets
-        # DatasetEnum.MUTAG,
-        # DatasetEnum.MUTAGENICITY,
-        # DatasetEnum.BBBP,
-        # DatasetEnum.PROTEINS,
-        # DatasetEnum.IMDB_BINARY,
-        # DatasetEnum.REDDIT_BINARY,
-        # DatasetEnum.COLLAB,
         # Algorithmic dataset
         DatasetEnum.DISTANCE,
         DatasetEnum.PATH_FINDING,
@@ -565,9 +575,17 @@ if __name__ == "__main__":
         DatasetEnum.ROOT_VALUE,
         DatasetEnum.GAME_OF_LIFE,
         DatasetEnum.HEXAGONAL_GAME_OF_LIFE,
+        # Real-world datasets
+        DatasetEnum.MUTAG,
+        DatasetEnum.MUTAGENICITY,
+        DatasetEnum.BBBP,
+        DatasetEnum.PROTEINS,
+        DatasetEnum.IMDB_BINARY,
+        DatasetEnum.REDDIT_BINARY,
+        DatasetEnum.COLLAB,
     ]
 
-    datasets = [DatasetEnum.SIMPLE_SATURATION]  # + datasets
+    datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.SATURATION]  # + datasets
     # datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
@@ -579,20 +597,22 @@ if __name__ == "__main__":
             std_acc_dt,
             mean_acc_dt_pruned,
             std_acc_dt_pruned,
+            mean_acc_cm,
+            std_acc_cm,
         ) in results.items():
             store_results(
                 results, filename="results_temp.csv", filename2="results2_temp.csv"
             )
             if success:
                 print(
-                    f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}, DT pruned {mean_acc_dt_pruned:.2f} ± {std_acc_dt_pruned:.2f}"
+                    f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}, DT pruned {mean_acc_dt_pruned:.2f} ± {std_acc_dt_pruned:.2f}, CM {mean_acc_cm:.2f} ± {std_acc_cm:.2f}"
                 )
             else:
                 print(f"🛑 {dataset_}")
         print("Running dataset:", dataset)
         try:
             config = get_config_for_dataset(dataset)
-            lightning.seed_everything(0)
+            lightning.seed_everything(0, workers=True)
             (
                 mean_acc,
                 std_acc,
@@ -600,6 +620,8 @@ if __name__ == "__main__":
                 std_acc_dt,
                 mean_acc_dt_pruned,
                 std_acc_dt_pruned,
+                mean_acc_cm,
+                std_acc_cm,
             ) = train(config)
             results[dataset] = (
                 True,
@@ -609,14 +631,16 @@ if __name__ == "__main__":
                 std_acc_dt,
                 mean_acc_dt_pruned,
                 std_acc_dt_pruned,
+                mean_acc_cm,
+                std_acc_cm,
             )
         except Exception as e:
             print(f"Error with dataset {dataset}: {e}")
-            results[dataset] = (False, None, None, None, None, None, None)
+            results[dataset] = (False, None, None, None, None, None, None, None, None)
             import traceback
 
             traceback.print_exc()
-            raise e
+            # raise e
 
     for dataset_, (
         success,
@@ -626,10 +650,12 @@ if __name__ == "__main__":
         std_acc_dt,
         mean_acc_dt_pruned,
         std_acc_dt_pruned,
+        mean_acc_cm,
+        std_acc_cm,
     ) in results.items():
         if success:
             print(
-                f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}"
+                f"✅ {dataset_}: GNN {mean_acc:.2f} ± {std_acc:.2f}, DT {mean_acc_dt:.2f} ± {std_acc_dt:.2f}, DT pruned {mean_acc_dt_pruned:.2f} ± {std_acc_dt_pruned:.2f}, CM {mean_acc_cm:.2f} ± {std_acc_cm:.2f}"
             )
         else:
             print(f"🛑 {dataset_}")
