@@ -249,10 +249,9 @@ def train(config: Config, base_experiment_title=None):
             patience=100,
             verbose=False,
             mode="min",
-            stopping_threshold=0.001,
         )
         checkpoint_callback = ModelCheckpoint(
-            save_top_k=1, monitor="val_acc", mode="max"
+            save_top_k=1, monitor="val_loss", mode="min"
         )
 
         class_weights = get_class_weights(
