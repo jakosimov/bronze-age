@@ -166,8 +166,10 @@ class LightningModel(lightning.LightningModule):
             else _cross_entropy_loss(y_hat, y, self.class_weights.to(y_hat.device))
         )
         final_loss = loss + self.config.entropy_loss_scaling * entropy_loss
-        
-        self.log(f"val_loss{self.suffix}", final_loss, batch_size=y.size(0), on_epoch=True)
+
+        self.log(
+            f"val_loss{self.suffix}", final_loss, batch_size=y.size(0), on_epoch=True
+        )
 
         self.val_accuracy(y_hat, y)
         self.log(
@@ -209,10 +211,10 @@ class LightningModel(lightning.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+        return torch.optim.Adam(self.parameters(), lr=self.config.learning_rate)
 
 
-def train(config: Config):
+def train(config: Config, base_experiment_title=None):
     dataset = get_dataset(config)
 
     test_accuracies = []
@@ -221,7 +223,10 @@ def train(config: Config):
     test_accuracies_cm = []
 
     start_time = pd.Timestamp.now().strftime("%d/%m/%y %H:%M")
+
     experiment_title = f"{start_time} {config.dataset} {config.layer_type}"
+    if base_experiment_title is not None:
+        experiment_title = f"{base_experiment_title} {experiment_title}"
 
     split = CrossValidationSplit(config, dataset, random_state=42)
     for i, (train_dataset, val_dataset, test_dataset) in enumerate(split):
@@ -239,7 +244,12 @@ def train(config: Config):
         )
 
         early_stopping = EarlyStopping(
-            monitor="val_loss", min_delta=0.00, patience=100, verbose=False, mode="min", stopping_threshold=0.001
+            monitor="val_loss",
+            min_delta=0.00,
+            patience=100,
+            verbose=False,
+            mode="min",
+            stopping_threshold=0.001,
         )
         checkpoint_callback = ModelCheckpoint(
             save_top_k=1, monitor="val_acc", mode="max"
@@ -298,7 +308,9 @@ def train(config: Config):
                 suffix="_dt",
             )
             # save the decision tree model
-            tree_model_path = Path(logger.log_dir) / "checkpoints" / f"decision_tree_model.pt"
+            tree_model_path = (
+                Path(logger.log_dir) / "checkpoints" / f"decision_tree_model.pt"
+            )
             torch.save(tree_model, tree_model_path)
             test_accuracy_dt = trainer.test(
                 wrapped_tree_model, test_loader, verbose=False
@@ -318,8 +330,10 @@ def train(config: Config):
                     "test_acc_dt_while_pruning"
                 ]
 
-            pruned_tree_model, num_nodes_pruned, num_nodes_remaining = tree_model.prune_decision_trees(
-                train_loader_test, val_loader, score_model
+            pruned_tree_model, num_nodes_pruned, num_nodes_remaining = (
+                tree_model.prune_decision_trees(
+                    train_loader_test, val_loader, score_model
+                )
             )
             wrapped_pruned_model = LightningModel(
                 pruned_tree_model,
@@ -328,7 +342,9 @@ def train(config: Config):
                 class_weights=class_weights,
                 suffix="_dt_pruned",
             )
-            pruned_tree_model_path = Path(logger.log_dir) / "checkpoints" / f"pruned_decision_tree_model.pt"
+            pruned_tree_model_path = (
+                Path(logger.log_dir) / "checkpoints" / f"pruned_decision_tree_model.pt"
+            )
             torch.save(pruned_tree_model, pruned_tree_model_path)
             test_accuracy_dt_pruned = trainer.test(
                 wrapped_pruned_model, test_loader, verbose=False
@@ -347,7 +363,9 @@ def train(config: Config):
                 class_weights=class_weights,
                 suffix="_cm",
             )
-            concept_model_path = Path(logger.log_dir) / "checkpoints" / f"concept_model.pt"
+            concept_model_path = (
+                Path(logger.log_dir) / "checkpoints" / f"concept_model.pt"
+            )
             torch.save(concept_model, concept_model_path)
             test_accuracy_cm = trainer.test(
                 wrapped_concept_model, test_loader, verbose=False
@@ -361,7 +379,9 @@ def train(config: Config):
         print(f"Test accuracy: {test_accuracy}")
         if config.train_decision_tree:
             print(f"Test accuracy DT: {test_accuracy_dt}")
-            print(f"Test accuracy DT pruned ({num_nodes_remaining} nodes): {test_accuracy_dt_pruned}")
+            print(
+                f"Test accuracy DT pruned ({num_nodes_remaining} nodes): {test_accuracy_dt_pruned}"
+            )
         if config.train_concept_model:
             print(f"Test accuracy CM: {test_accuracy_cm}")
         print(f"=====================")
@@ -386,14 +406,10 @@ def train(config: Config):
     print(f"=====================")
 
     return (
-        np.mean(test_accuracies),
-        np.std(test_accuracies),
-        np.mean(test_accuracies_dt),
-        np.std(test_accuracies_dt),
-        np.mean(test_accuracies_dt_pruned),
-        np.std(test_accuracies_dt_pruned),
-        np.mean(test_accuracies_cm),
-        np.std(test_accuracies_cm),
+        test_accuracies,
+        test_accuracies_dt,
+        test_accuracies_dt_pruned,
+        test_accuracies_cm,
     )
 
 
@@ -453,7 +469,7 @@ def get_config_for_dataset(dataset, **kwargs):
         DatasetEnum.HEXAGONAL_GAME_OF_LIFE: 1,
     }
     BATCH_SIZES = {
-        DatasetEnum.SATURATION : 1,
+        DatasetEnum.SATURATION: 1,
     }
     config = {
         "data_dir": "downloads",
@@ -470,9 +486,9 @@ def get_config_for_dataset(dataset, **kwargs):
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
-        "nonlinearity": None,
-        "evaluation_nonlinearity": None,
+        "layer_type": LayerType.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
         "concept_embedding_size": 128,
         "concept_temperature": 0.1,
         "entropy_loss_scaling": 0.2,
@@ -493,13 +509,23 @@ def get_config_for_dataset(dataset, **kwargs):
 
 def store_results(results, filename="results.csv", filename2="results2.csv"):
     df = pd.DataFrame(results).T
-    df.columns = ["success", "mean_acc", "std_acc", "mean_acc_dt", "std_acc_dt", "mean_acc_dt_pruned", "std_acc_dt_pruned", "mean_acc_cm", "std_acc_cm"]
+    df.columns = [
+        "success",
+        "mean_acc",
+        "std_acc",
+        "mean_acc_dt",
+        "std_acc_dt",
+        "mean_acc_dt_pruned",
+        "std_acc_dt_pruned",
+        "mean_acc_cm",
+        "std_acc_cm",
+    ]
 
     df.success = df.success.replace({True: "✅", False: "🛑"})
     df["uses_mask"] = df.index.map(lambda x: x.uses_mask)
     df["uses_pooling"] = df.index.map(lambda x: x.uses_pooling)
     df.to_csv(filename)
-    
+
     df2 = df[["success", "uses_mask", "uses_pooling"]].copy()
 
     df2["GNN"] = (
@@ -556,11 +582,10 @@ if __name__ == "__main__":
         DatasetEnum.IMDB_BINARY,
         DatasetEnum.REDDIT_BINARY,
         DatasetEnum.COLLAB,
-        
     ]
 
-    datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.SATURATION] #+ datasets
-    #datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
+    datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.SATURATION]  # + datasets
+    # datasets = [DatasetEnum.SIMPLE_SATURATION, DatasetEnum.INFECTION, DatasetEnum.MUTAG]
     # datasets = [DatasetEnum.BA_2MOTIFS]
     for dataset in datasets:
         for dataset_, (
@@ -587,14 +612,48 @@ if __name__ == "__main__":
         try:
             config = get_config_for_dataset(dataset)
             lightning.seed_everything(0, workers=True)
-            mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned, mean_acc_cm, std_acc_cm = train(config)
-            results[dataset] = (True, mean_acc, std_acc, mean_acc_dt, std_acc_dt, mean_acc_dt_pruned, std_acc_dt_pruned, mean_acc_cm, std_acc_cm)
+            (
+                test_accuracies,
+                test_accuracies_dt,
+                test_accuracies_dt_pruned,
+                test_accuracies_cm,
+            ) = train(config)
+
+            mean_acc = np.mean(test_accuracies)
+            std_acc = np.std(test_accuracies)
+            std_acc_dt = np.std(test_accuracies_dt)
+            mean_acc_dt = np.mean(test_accuracies_dt)
+            mean_acc_dt_pruned = np.mean(test_accuracies_dt_pruned)
+            std_acc_dt_pruned = np.std(test_accuracies_dt_pruned)
+            mean_acc_cm = np.mean(test_accuracies_cm)
+            std_acc_cm = np.std(test_accuracies_cm)
+            # mean_acc,
+            #     std_acc,
+            #     mean_acc_dt,
+            #     std_acc_dt,
+            #     mean_acc_dt_pruned,
+            #     std_acc_dt_pruned,
+            #     mean_acc_cm,
+            #     std_acc_cm,
+
+            results[dataset] = (
+                True,
+                mean_acc,
+                std_acc,
+                mean_acc_dt,
+                std_acc_dt,
+                mean_acc_dt_pruned,
+                std_acc_dt_pruned,
+                mean_acc_cm,
+                std_acc_cm,
+            )
         except Exception as e:
             print(f"Error with dataset {dataset}: {e}")
             results[dataset] = (False, None, None, None, None, None, None, None, None)
             import traceback
+
             traceback.print_exc()
-            #raise e
+            # raise e
 
     for dataset_, (
         success,
