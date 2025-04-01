@@ -237,13 +237,14 @@ def run_ablation_experiment(
     entropy_loss_scaling: float,
     aggregation_mode: AggregationMode,
     training_nonlinearity: NonLinearity | None = None,
+    embedding_size: int = 128,
 ):
     specific_config = {
         "bounding_parameter": 10,
         "layer_type": layer_type,
         "nonlinearity": training_nonlinearity,
         "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
-        "concept_embedding_size": 128,
+        "concept_embedding_size": embedding_size,
         "entropy_loss_scaling": entropy_loss_scaling,
         "train_decision_tree": False,
         "aggregation_mode": aggregation_mode,
@@ -296,19 +297,28 @@ def run_ablation_study(layer_type: LayerTypeBronze):
     )
 
     run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age",
+        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, Diff Argmax",
         LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=standard_entropy_loss,
         aggregation_mode=AggregationMode.BRONZE_AGE,
         training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
     )
     run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age",
+        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age, Diff Argmax",
         LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=0.0,
         aggregation_mode=AggregationMode.BRONZE_AGE,
         training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
     )
+    if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER:
+        run_ablation_experiment(
+            f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, 32 emb size",
+            LayerTypeBronze.DEEP_CONCEPT_REASONER,
+            entropy_loss_scaling=standard_entropy_loss,
+            aggregation_mode=AggregationMode.BRONZE_AGE,
+            training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
+            embedding_size=32,
+        )
 
 
 run_dcr_ablation_study = lambda: run_ablation_study(
