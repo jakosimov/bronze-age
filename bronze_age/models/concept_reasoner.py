@@ -488,6 +488,8 @@ class MemoryBasedReasonerModule(torch.nn.Module):
             nn.Linear(self.emb_size, n_classes * self.n_rules),
         )
 
+        self.diff_argmax = DifferentiableArgmax(config)
+
     def decode_rules(self):
         rule_embs = self.rule_book.weight.view(
             self.n_classes, self.n_rules, self.emb_size
@@ -525,15 +527,17 @@ class MemoryBasedReasonerModule(torch.nn.Module):
         x = x[..., None, :]
         # batch_dim, n_classes, n_concepts
         preds = (pos_rules * x + neg_rules * (1 - x) + irr_rules).prod(dim=-1)
-        # preds = preds.clamp(0.01, 0.99)
+        preds = preds.clamp(0.001, 0.999)
         c_rec = 0.5 * irr_rules + pos_rules
-        # c_rec = c_rec.clamp(0.01, 0.99)
+        c_rec = c_rec.clamp(0.001, 0.999)
         # c_rec_w = (1 - irr_rules)
         # aux_loss = (F.binary_cross_entropy(pos_rules, x.repeat(1, pos_rules.shape[1], 1),reduction="none") * c_rec_w).mean(dim=-1)
         aux_loss = F.binary_cross_entropy(
             c_rec, x.repeat(1, c_rec.shape[1], 1), reduction="none"
         ).mean(dim=-1)
-        aux_loss = (aux_loss * preds).mean()
+
+        entropy_loss = F.mse_loss(preds, self.diff_argmax(preds), reduction="mean")
+        aux_loss = (aux_loss * preds).mean() + entropy_loss
 
         explanations = None
         assert (
