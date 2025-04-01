@@ -1,11 +1,19 @@
+import os
 from dataclasses import asdict
 from enum import StrEnum
+
 import lightning
-from bronze_age.config import BronzeConfig, LayerTypeBronze
-from bronze_age.datasets import DatasetEnum
-from train_bronze import train, get_config_for_dataset
 import pandas as pd
-import os
+
+from bronze_age.config import (
+    AggregationMode,
+    BronzeConfig,
+    LayerTypeBronze,
+    LossMode,
+    NonLinearity,
+)
+from bronze_age.datasets import DatasetEnum
+from train_bronze import get_config_for_dataset, train
 
 ALL_DATASETS = [
     DatasetEnum.INFECTION,
@@ -38,6 +46,16 @@ SYNTHETIC_DATASETS = [
     DatasetEnum.TREE_CYCLE,
     DatasetEnum.TREE_GRID,
     DatasetEnum.BA_2MOTIFS,
+]
+
+REAL_WORLD_DATASETS = [
+    DatasetEnum.MUTAG,
+    DatasetEnum.MUTAGENICITY,
+    DatasetEnum.BBBP,
+    DatasetEnum.PROTEINS,
+    DatasetEnum.IMDB_BINARY,
+    DatasetEnum.REDDIT_BINARY,
+    DatasetEnum.COLLAB,
 ]
 
 NAR_DATASETS = [
@@ -123,11 +141,94 @@ def run_experiment(experiment_title, datasets, **config_args):
     )
 
 
+def run_stoneage():
+    experiment_title = "Final Results - Baseline - Stone Age"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": True,
+        "bounding_parameter": 1000,
+        "layer_type": LayerTypeBronze.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "concept_embedding_size": 128,
+        "concept_temperature": 0.1,
+        "entropy_loss_scaling": 0.0,
+        "early_stopping": True,
+        "loss_mode": LossMode.CROSS_ENTROPY,
+        "train_decision_tree": True,
+        "aggregation_mode": AggregationMode.STONE_AGE,
+        "teacher_max_epochs": 15,
+        "train_concept_model": False,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(experiment_title, SYNTHETIC_DATASETS + REAL_WORLD_DATASETS, **specific_config)
+
+def run_bronzeage_dcr():
+    experiment_title = "Final Results - Bronze Age DCR"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": True,
+        "bounding_parameter": 10,
+        "layer_type": LayerTypeBronze.DEEP_CONCEPT_REASONER,
+        "nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "concept_embedding_size": 128,
+        "concept_temperature": 0.1,
+        "entropy_loss_scaling": 0.2,
+        "early_stopping": True,
+        "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.BRONZE_AGE_COMPARISON,
+        "teacher_max_epochs": 15,
+        "train_concept_model": False,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(experiment_title, SYNTHETIC_DATASETS + REAL_WORLD_DATASETS, **specific_config)
+
+def run_bronzeage_cmr():
+    experiment_title = "Final Results - Bronze Age CMR"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": True,
+        "bounding_parameter": 10,
+        "layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "concept_embedding_size": 128,
+        "concept_temperature": 0.1,
+        "entropy_loss_scaling": 0.2,
+        "early_stopping": True,
+        "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.BRONZE_AGE_COMPARISON,
+        "teacher_max_epochs": 15,
+        "train_concept_model": False,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(experiment_title, SYNTHETIC_DATASETS + REAL_WORLD_DATASETS, **specific_config)
 if __name__ == "__main__":
-    # Example usage
-    experiment_title = "Ablation study - Bronze Age"
-    run_experiment(
-        experiment_title,
-        [DatasetEnum.SIMPLE_SATURATION],
-        layer_type=LayerTypeBronze.DEEP_CONCEPT_REASONER,
-    )
+    for exp in [run_stoneage, run_bronzeage_dcr, run_bronzeage_cmr]:
+        try:
+            exp()
+        except Exception as e:
+            print(f"Experiment {exp.__name__} failed with error: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+    print("All experiments completed.")
+
