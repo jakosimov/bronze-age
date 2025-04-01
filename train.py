@@ -461,7 +461,7 @@ if __name__ == "__main__":
         DatasetEnum.REDDIT_BINARY,
         DatasetEnum.COLLAB,
     ]
-    datasets = [DatasetEnum.DISTANCE]
+    datasets = [DatasetEnum.SATURATION]
 
     for dataset in datasets:
         for dataset_, (
