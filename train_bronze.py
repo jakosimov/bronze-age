@@ -211,10 +211,10 @@ class LightningModel(lightning.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=config.learning_rate)
+        return torch.optim.Adam(self.parameters(), lr=self.config.learning_rate)
 
 
-def train(config: Config):
+def train(config: Config, base_experiment_title=None):
     dataset = get_dataset(config)
 
     test_accuracies = []
@@ -223,7 +223,10 @@ def train(config: Config):
     test_accuracies_cm = []
 
     start_time = pd.Timestamp.now().strftime("%d/%m/%y %H:%M")
+
     experiment_title = f"{start_time} {config.dataset} {config.layer_type}"
+    if base_experiment_title is not None:
+        experiment_title = f"{base_experiment_title} {experiment_title}"
 
     split = CrossValidationSplit(config, dataset, random_state=42)
     for i, (train_dataset, val_dataset, test_dataset) in enumerate(split):
@@ -403,14 +406,10 @@ def train(config: Config):
     print(f"=====================")
 
     return (
-        np.mean(test_accuracies),
-        np.std(test_accuracies),
-        np.mean(test_accuracies_dt),
-        np.std(test_accuracies_dt),
-        np.mean(test_accuracies_dt_pruned),
-        np.std(test_accuracies_dt_pruned),
-        np.mean(test_accuracies_cm),
-        np.std(test_accuracies_cm),
+        test_accuracies,
+        test_accuracies_dt,
+        test_accuracies_dt_pruned,
+        test_accuracies_cm,
     )
 
 
@@ -487,9 +486,9 @@ def get_config_for_dataset(dataset, **kwargs):
         "dataset": dataset,
         "num_layers": NUM_LAYERS[dataset],
         "state_size": NUM_STATES[dataset],
-        "layer_type": LayerType.MEMORY_BASED_CONCEPT_REASONER,
-        "nonlinearity": None,
-        "evaluation_nonlinearity": None,
+        "layer_type": LayerType.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
         "concept_embedding_size": 128,
         "concept_temperature": 0.1,
         "entropy_loss_scaling": 0.2,
@@ -614,15 +613,29 @@ if __name__ == "__main__":
             config = get_config_for_dataset(dataset)
             lightning.seed_everything(0, workers=True)
             (
-                mean_acc,
-                std_acc,
-                mean_acc_dt,
-                std_acc_dt,
-                mean_acc_dt_pruned,
-                std_acc_dt_pruned,
-                mean_acc_cm,
-                std_acc_cm,
+                test_accuracies,
+                test_accuracies_dt,
+                test_accuracies_dt_pruned,
+                test_accuracies_cm,
             ) = train(config)
+
+            mean_acc = np.mean(test_accuracies)
+            std_acc = np.std(test_accuracies)
+            std_acc_dt = np.std(test_accuracies_dt)
+            mean_acc_dt = np.mean(test_accuracies_dt)
+            mean_acc_dt_pruned = np.mean(test_accuracies_dt_pruned)
+            std_acc_dt_pruned = np.std(test_accuracies_dt_pruned)
+            mean_acc_cm = np.mean(test_accuracies_cm)
+            std_acc_cm = np.std(test_accuracies_cm)
+            # mean_acc,
+            #     std_acc,
+            #     mean_acc_dt,
+            #     std_acc_dt,
+            #     mean_acc_dt_pruned,
+            #     std_acc_dt_pruned,
+            #     mean_acc_cm,
+            #     std_acc_cm,
+
             results[dataset] = (
                 True,
                 mean_acc,
