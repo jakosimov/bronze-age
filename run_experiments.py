@@ -166,7 +166,10 @@ def run_stoneage():
         "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
         "concept_memory_disjunctions": 4,
     }
-    run_experiment(experiment_title, SYNTHETIC_DATASETS + REAL_WORLD_DATASETS, **specific_config)
+    run_experiment(
+        experiment_title, SYNTHETIC_DATASETS + REAL_WORLD_DATASETS, **specific_config
+    )
+
 
 def run_bronzeage_dcr():
     experiment_title = "Final Results - Bronze Age DCR"
@@ -193,7 +196,10 @@ def run_bronzeage_dcr():
         "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
         "concept_memory_disjunctions": 4,
     }
-    run_experiment(experiment_title, SYNTHETIC_DATASETS + REAL_WORLD_DATASETS, **specific_config)
+    run_experiment(
+        experiment_title, SYNTHETIC_DATASETS + REAL_WORLD_DATASETS, **specific_config
+    )
+
 
 def run_bronzeage_cmr():
     experiment_title = "Final Results - Bronze Age CMR"
@@ -220,15 +226,97 @@ def run_bronzeage_cmr():
         "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
         "concept_memory_disjunctions": 4,
     }
-    run_experiment(experiment_title, SYNTHETIC_DATASETS + REAL_WORLD_DATASETS, **specific_config)
+    run_experiment(
+        experiment_title, SYNTHETIC_DATASETS + REAL_WORLD_DATASETS, **specific_config
+    )
+
+
+def run_ablation_experiment(
+    experiment_title: str,
+    layer_type: LayerTypeBronze,
+    entropy_loss_scaling: float,
+    aggregation_mode: AggregationMode,
+):
+    specific_config = {
+        "bounding_parameter": 10,
+        "layer_type": layer_type,
+        "nonlinearity": None,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "concept_embedding_size": 128,
+        "entropy_loss_scaling": entropy_loss_scaling,
+        "train_decision_tree": False,
+        "aggregation_mode": aggregation_mode,
+        "train_concept_model": False,
+    }
+    run_experiment(experiment_title, SYNTHETIC_DATASETS, **specific_config)
+
+
+def run_ablation_study(layer_type: LayerTypeBronze):
+    standard_entropy_loss = 0.2
+    layer_title = (
+        "DCR" if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER else "CMR"
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age",
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
+        entropy_loss_scaling=standard_entropy_loss,
+        aggregation_mode=AggregationMode.BRONZE_AGE,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age",
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
+        entropy_loss_scaling=0.0,
+        aggregation_mode=AggregationMode.BRONZE_AGE,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - Entropy Loss, Rounded",
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
+        entropy_loss_scaling=standard_entropy_loss,
+        aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - No Entropy Loss, Rounded",
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
+        entropy_loss_scaling=0.0,
+        aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
+    )
+
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - Entropy Loss, Comparison",
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
+        entropy_loss_scaling=standard_entropy_loss,
+        aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - No Entropy Loss, Comparison",
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
+        entropy_loss_scaling=0.0,
+        aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
+    )
+
+
+run_dcr_ablation_study = lambda: run_ablation_study(
+    LayerTypeBronze.DEEP_CONCEPT_REASONER
+)
+run_cmr_ablation_study = lambda: run_ablation_study(
+    LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER
+)
+
+ablation_studies = [
+    run_dcr_ablation_study,
+    run_cmr_ablation_study,
+]
+
+base_tests = [run_stoneage, run_bronzeage_dcr, run_bronzeage_cmr]
+
 if __name__ == "__main__":
-    for exp in [run_stoneage, run_bronzeage_dcr, run_bronzeage_cmr]:
+    for exp in ablation_studies:
         try:
             exp()
         except Exception as e:
             print(f"Experiment {exp.__name__} failed with error: {e}")
             import traceback
+
             traceback.print_exc()
             continue
     print("All experiments completed.")
-
