@@ -39,7 +39,7 @@ class Config:
     skip_connection: bool = True
     bounding_parameter: int = 10
     batch_size: int = 128
-    device: str = "mps"
+    device: str = "cpu"
     max_leaf_nodes: int = 100
     learning_rate: float = 0.01
     max_epochs: int = 1500
@@ -98,7 +98,7 @@ class BronzeConfig:
     skip_connection: bool = True
     bounding_parameter: int = 10
     batch_size: int = 128
-    device: str = "mps"
+    device: str = "cpu"
     # decision tree parameters
     train_decision_tree: bool = False
     max_leaf_nodes: int = 100
