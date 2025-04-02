@@ -253,6 +253,75 @@ def run_ablation_experiment(
     }
     run_experiment(experiment_title, SYNTHETIC_DATASETS, **specific_config)
 
+def run_ablation_study_reverse(layer_type: LayerTypeBronze):
+    standard_entropy_loss = 0.2
+    layer_title = (
+        "DCR" if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER else "CMR"
+    )
+
+    if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER:
+        run_ablation_experiment(
+            f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, 32 emb size",
+            layer_type,
+            entropy_loss_scaling=standard_entropy_loss,
+            aggregation_mode=AggregationMode.BRONZE_AGE,
+            training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
+            embedding_size=32,
+        )
+
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age, Diff Argmax",
+        layer_type,
+        entropy_loss_scaling=0.0,
+        aggregation_mode=AggregationMode.BRONZE_AGE,
+        training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
+    )
+
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, Diff Argmax",
+        layer_type,
+        entropy_loss_scaling=standard_entropy_loss,
+        aggregation_mode=AggregationMode.BRONZE_AGE,
+        training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - No Entropy Loss, Comparison",
+        layer_type,
+        entropy_loss_scaling=0.0,
+        aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - Entropy Loss, Comparison",
+        layer_type,
+        entropy_loss_scaling=standard_entropy_loss,
+        aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - No Entropy Loss, Rounded",
+        layer_type,
+        entropy_loss_scaling=0.0,
+        aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - Entropy Loss, Rounded",
+        layer_type,
+        entropy_loss_scaling=standard_entropy_loss,
+        aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age",
+        layer_type,
+        entropy_loss_scaling=0.0,
+        aggregation_mode=AggregationMode.BRONZE_AGE,
+    )
+    run_ablation_experiment(
+        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age",
+        layer_type,
+        entropy_loss_scaling=standard_entropy_loss,
+        aggregation_mode=AggregationMode.BRONZE_AGE,
+    )
+
+
 
 def run_ablation_study(layer_type: LayerTypeBronze):
     standard_entropy_loss = 0.2
@@ -329,15 +398,19 @@ run_cmr_ablation_study = lambda: run_ablation_study(
     LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER
 )
 
+run_dcr_ablation_study_reverse = lambda: run_ablation_study_reverse(LayerTypeBronze.DEEP_CONCEPT_REASONER)
+
 ablation_studies = [
     run_dcr_ablation_study,
     run_cmr_ablation_study,
 ]
 
+
+
 base_tests = [run_stoneage, run_bronzeage_dcr, run_bronzeage_cmr]
 
 if __name__ == "__main__":
-    for exp in [run_cmr_ablation_study]:
+    for exp in [run_dcr_ablation_study_reverse]:
         try:
             exp()
         except Exception as e:

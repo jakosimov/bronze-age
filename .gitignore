@@ -175,4 +175,4 @@ cython_debug/
 
 lightning_logs*/
 results*/
-experiments/
+experiments/*_temp.csv
