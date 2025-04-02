@@ -40,9 +40,8 @@ ALL_DATASETS = [
 ]
 
 SYNTHETIC_DATASETS = [
-    DatasetEnum.SIMPLE_SATURATION,
-    DatasetEnum.SATURATION,
     DatasetEnum.INFECTION,
+    DatasetEnum.SATURATION,
     DatasetEnum.BA_SHAPES,
     DatasetEnum.TREE_CYCLE,
     DatasetEnum.TREE_GRID,
@@ -83,10 +82,11 @@ def save_data_to_csv(dicts, filename):
 def run_experiment(experiment_title, datasets, **config_args):
     results = []
     start_time = pd.Timestamp.now().strftime("%d_%m_%y_%H_%M")
-
-    for dataset in datasets:
+    for num_layers in range(1, 5):
+        config_args["num_layers"] = num_layers
+        dataset = datasets[0]
         try:
-            print(f"Experiment: {experiment_title}, Dataset: {dataset}")
+            print(f"Experiment: {experiment_title}, Dataset: {dataset}, Num Layers: {num_layers}")
             print("Settings: ")
             print(config_args)
             config: BronzeConfig = get_config_for_dataset(dataset, **config_args)
@@ -137,6 +137,9 @@ def run_experiment(experiment_title, datasets, **config_args):
             print(
                 f"Experiment: {experiment_title}, Dataset: {dataset} failed with error: {e}"
             )
+            import traceback
+
+            traceback.print_exc()
     save_data_to_csv(
         results, f"results_{experiment_title.replace(' ', '_')}_{start_time}.csv"
     )
@@ -238,89 +241,19 @@ def run_ablation_experiment(
     entropy_loss_scaling: float,
     aggregation_mode: AggregationMode,
     training_nonlinearity: NonLinearity | None = None,
-    embedding_size: int = 32,
 ):
     specific_config = {
         "bounding_parameter": 10,
         "layer_type": layer_type,
         "nonlinearity": training_nonlinearity,
         "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
-        "concept_embedding_size": embedding_size,
+        "concept_embedding_size": 128,
         "entropy_loss_scaling": entropy_loss_scaling,
         "train_decision_tree": False,
         "aggregation_mode": aggregation_mode,
         "train_concept_model": False,
     }
     run_experiment(experiment_title, SYNTHETIC_DATASETS, **specific_config)
-
-def run_ablation_study_reverse(layer_type: LayerTypeBronze):
-    standard_entropy_loss = 0.2
-    layer_title = (
-        "DCR" if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER else "CMR"
-    )
-
-    if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER:
-        run_ablation_experiment(
-            f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, 32 emb size",
-            layer_type,
-            entropy_loss_scaling=standard_entropy_loss,
-            aggregation_mode=AggregationMode.BRONZE_AGE,
-            training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
-            embedding_size=32,
-        )
-
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age, Diff Argmax",
-        layer_type,
-        entropy_loss_scaling=0.0,
-        aggregation_mode=AggregationMode.BRONZE_AGE,
-        training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
-    )
-
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, Diff Argmax",
-        layer_type,
-        entropy_loss_scaling=standard_entropy_loss,
-        aggregation_mode=AggregationMode.BRONZE_AGE,
-        training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Comparison",
-        layer_type,
-        entropy_loss_scaling=0.0,
-        aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Comparison",
-        layer_type,
-        entropy_loss_scaling=standard_entropy_loss,
-        aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Rounded",
-        layer_type,
-        entropy_loss_scaling=0.0,
-        aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Rounded",
-        layer_type,
-        entropy_loss_scaling=standard_entropy_loss,
-        aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age",
-        layer_type,
-        entropy_loss_scaling=0.0,
-        aggregation_mode=AggregationMode.BRONZE_AGE,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age",
-        layer_type,
-        entropy_loss_scaling=standard_entropy_loss,
-        aggregation_mode=AggregationMode.BRONZE_AGE,
-    )
-
 
 
 def run_ablation_study(layer_type: LayerTypeBronze):
@@ -330,65 +263,56 @@ def run_ablation_study(layer_type: LayerTypeBronze):
     )
     run_ablation_experiment(
         f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age",
-        layer_type,
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=standard_entropy_loss,
         aggregation_mode=AggregationMode.BRONZE_AGE,
     )
     run_ablation_experiment(
         f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age",
-        layer_type,
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=0.0,
         aggregation_mode=AggregationMode.BRONZE_AGE,
     )
     run_ablation_experiment(
         f"Ablation Study - {layer_title} - Entropy Loss, Rounded",
-        layer_type,
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=standard_entropy_loss,
         aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
     )
     run_ablation_experiment(
         f"Ablation Study - {layer_title} - No Entropy Loss, Rounded",
-        layer_type,
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=0.0,
         aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
     )
 
     run_ablation_experiment(
         f"Ablation Study - {layer_title} - Entropy Loss, Comparison",
-        layer_type,
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=standard_entropy_loss,
         aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
     )
     run_ablation_experiment(
         f"Ablation Study - {layer_title} - No Entropy Loss, Comparison",
-        layer_type,
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=0.0,
         aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
     )
 
     run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, Diff Argmax",
-        layer_type,
+        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age",
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=standard_entropy_loss,
         aggregation_mode=AggregationMode.BRONZE_AGE,
         training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
     )
     run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age, Diff Argmax",
-        layer_type,
+        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age",
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
         entropy_loss_scaling=0.0,
         aggregation_mode=AggregationMode.BRONZE_AGE,
         training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
     )
-    if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER:
-        run_ablation_experiment(
-            f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, 32 emb size",
-            layer_type,
-            entropy_loss_scaling=standard_entropy_loss,
-            aggregation_mode=AggregationMode.BRONZE_AGE,
-            training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
-            embedding_size=32,
-        )
 
 
 run_dcr_ablation_study = lambda: run_ablation_study(
@@ -398,19 +322,130 @@ run_cmr_ablation_study = lambda: run_ablation_study(
     LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER
 )
 
-run_dcr_ablation_study_reverse = lambda: run_ablation_study_reverse(LayerTypeBronze.DEEP_CONCEPT_REASONER)
-
 ablation_studies = [
     run_dcr_ablation_study,
     run_cmr_ablation_study,
 ]
 
-
-
 base_tests = [run_stoneage, run_bronzeage_dcr, run_bronzeage_cmr]
 
+
+def run_multi_layer_ablation():
+    experiment_title = "MultiLayerAblation - Stone Age"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": False,
+        "bounding_parameter": 10,
+        "layer_type": LayerTypeBronze.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "concept_embedding_size": 128,
+        "concept_temperature": 0.5,
+        "entropy_loss_scaling": 0.2,
+        "early_stopping": True,
+        "loss_mode": LossMode.CROSS_ENTROPY,
+        "train_decision_tree": True,
+        "aggregation_mode": AggregationMode.STONE_AGE,
+        "teacher_max_epochs": 15,
+        "train_concept_model": False,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(
+        experiment_title, [DatasetEnum.INFECTION], **specific_config
+    )
+
+def run_multi_layer_ablation_bronze():
+    experiment_title = "MultiLayerAblation - Bronze Age (MLP)"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": False,
+        "bounding_parameter": 10,
+        "layer_type": LayerTypeBronze.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "concept_embedding_size": 128,
+        "concept_temperature": 0.5,
+        "entropy_loss_scaling": 0.2,
+        "early_stopping": True,
+        "loss_mode": LossMode.CROSS_ENTROPY,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "teacher_max_epochs": 15,
+        "train_concept_model": False,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(
+        experiment_title, [DatasetEnum.INFECTION], **specific_config
+    )
+def run_multi_layer_ablation_dcr():
+    experiment_title = "MultiLayerAblation - DCR"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": False,
+        "bounding_parameter": 10,
+        "layer_type": LayerTypeBronze.DEEP_CONCEPT_REASONER,
+        "nonlinearity": None,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "concept_embedding_size": 128,
+        "concept_temperature": 0.5,
+        "entropy_loss_scaling": 0.2,
+        "early_stopping": True,
+        "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "teacher_max_epochs": 15,
+        "train_concept_model": False,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(
+        experiment_title, [DatasetEnum.INFECTION], **specific_config
+    )
+
+def run_multi_layer_ablation_cmr():
+    experiment_title = "MultiLayerAblation - CMR"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": False,
+        "bounding_parameter": 10,
+        "layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "nonlinearity": None,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "concept_embedding_size": 128,
+        "concept_temperature": 0.5,
+        "entropy_loss_scaling": 0.2,
+        "early_stopping": True,
+        "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "teacher_max_epochs": 15,
+        "train_concept_model": False,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(
+        experiment_title, [DatasetEnum.INFECTION], **specific_config
+    )
 if __name__ == "__main__":
-    for exp in [run_dcr_ablation_study_reverse]:
+    for exp in [run_multi_layer_ablation_bronze]:
         try:
             exp()
         except Exception as e:

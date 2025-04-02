@@ -245,7 +245,7 @@ def train(config: Config, base_experiment_title=None):
 
         early_stopping = EarlyStopping(
             monitor="val_loss",
-            min_delta=0.00,
+            min_delta=0.001,
             patience=100,
             verbose=False,
             mode="min",

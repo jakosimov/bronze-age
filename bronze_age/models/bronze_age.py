@@ -420,7 +420,7 @@ class BronzeAgeGNN(torch.nn.Module):
         state_size = config.state_size
         num_layers = config.num_layers
 
-        self.input = BronzeAgeLayer(
+        """self.input = BronzeAgeLayer(
             in_channels,
             state_size,
             config,
@@ -430,7 +430,8 @@ class BronzeAgeGNN(torch.nn.Module):
                 else config.layer_type
             ),
             name="InputLayer",
-        )
+        )"""
+
 
         final_layer_inputs = (
             (self.config.num_recurrent_iterations * num_layers + 1) * state_size
@@ -454,28 +455,34 @@ class BronzeAgeGNN(torch.nn.Module):
             self.bounding_parameter = config.bounding_parameter
             self.register_buffer("_Y_range", torch.arange(self.bounding_parameter).float())
             final_layer_inputs = final_layer_inputs * self.bounding_parameter
-        self.output = BronzeAgeLayer(
+        """self.output = BronzeAgeLayer(
             final_layer_inputs,
             out_channels,
             config,
             non_linearity=final_non_linearity,
             name="PoolingLayer",
-        )
+        )"""
 
         self.stone_age = nn.ModuleList()
         for i in range(num_layers):
+            in_size = out_size = state_size
+            if i == 0:
+                in_size = in_channels
+            if i == num_layers - 1:
+                out_size = out_channels
             self.stone_age.append(
                 BronzeAgeGNNLayer(
-                    state_size, state_size, config, name=f"StoneAgeLayer-{i}"
+                    in_size, out_size, config, name=f"StoneAgeLayer-{i}"
                 )
             )
 
     def forward(self, x, edge_index, batch=None, return_explanation=False):
-        x, loss_term, explanation = self.input(
-            x.float(), return_explanation=return_explanation
-        )
-        entropy = {"input": loss_term}
-        explanations = {"input": explanation}
+        #x, loss_term, explanation = self.input(
+        #    x.float(), return_explanation=return_explanation
+        #)
+        entropy = {}
+        explanations = {}
+        x = x.float()
         xs = [x]
 
         for iteration in range(self.config.num_recurrent_iterations):
@@ -494,8 +501,8 @@ class BronzeAgeGNN(torch.nn.Module):
         if self.skip_connection:
             x = torch.cat(xs, dim=1)
 
-        x, _, explanation = self.output(x, return_explanation=return_explanation)
-        explanations["output"] = explanation
+        #x, _, explanation = self.output(x, return_explanation=return_explanation)
+        #explanations["output"] = explanation
 
         if not return_explanation:
             explanations = None
@@ -536,7 +543,7 @@ class BronzeAgeGNN(torch.nn.Module):
         for key in inputs_train.keys():
             inputs_train[key] = np.concatenate(inputs_train[key])
             outputs_train[key] = np.concatenate(outputs_train[key])
-        if len(inputs_train["output"]) < len(inputs_train["input"]):
+        """if len(inputs_train["output"]) < len(inputs_train["input"]):
             # this is a hack to make sure that the output has the same number of samples as the input
             # we simply repeat the output dataset until it has the same number of samples as the input
             # this is necessary when pooling
@@ -546,7 +553,7 @@ class BronzeAgeGNN(torch.nn.Module):
             ]
             outputs_train["output"] = np.tile(outputs_train["output"], (num_repeats))[
                 : len(inputs_train["input"])
-            ]
+            ]"""
         return inputs_train, outputs_train
 
     def train_concept_model(self, train_loader, experiment_title=""):
