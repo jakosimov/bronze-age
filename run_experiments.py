@@ -390,6 +390,101 @@ def run_ablation_study(layer_type: LayerTypeBronze):
             embedding_size=32,
         )
 
+def run_simple_saturation_stone_age():
+    experiment_title = "Simple Saturation - Stone Age"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": True,
+        "bounding_parameter": 1000,
+        "layer_type": LayerTypeBronze.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "concept_embedding_size": 128,
+        "concept_temperature": 0.1,
+        "entropy_loss_scaling": 0.0,
+        "early_stopping": True,
+        "loss_mode": LossMode.CROSS_ENTROPY,
+        "train_decision_tree": True,
+        "aggregation_mode": AggregationMode.STONE_AGE,
+        "teacher_max_epochs": 15,
+        "train_concept_model": False,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(
+        experiment_title, [DatasetEnum.SIMPLE_SATURATION], **specific_config
+    )
+
+def run_simple_saturation_bronze_age(layer_type: LayerTypeBronze):
+    experiment_title = f"Simple Saturation - {layer_type}"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": True,
+        "bounding_parameter": 10,
+        "layer_type": layer_type,
+        "nonlinearity": None,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "concept_embedding_size": 32 if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER else 128,
+        "concept_temperature": 0.5,
+        "entropy_loss_scaling": 0.2,
+        "early_stopping": False,
+        "loss_mode": LossMode.BINARY_CROSS_ENTROPY,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.BRONZE_AGE,
+        "teacher_max_epochs": 15,
+        "train_concept_model": False,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 2,
+    }
+    run_experiment(
+        experiment_title, [DatasetEnum.SIMPLE_SATURATION], **specific_config
+    )
+
+run_simple_saturation_bronze_age_dcr = lambda: run_simple_saturation_bronze_age(
+    LayerTypeBronze.DEEP_CONCEPT_REASONER
+)
+run_simple_saturation_bronze_age_cmr = lambda: run_simple_saturation_bronze_age(
+    LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER
+)
+
+
+def run_student_teacher_training_bronze():
+    experiment_title = "Student Teacher Training - Bronze Age CMR"
+    specific_config = {
+        "temperature": 1.0,
+        "dropout": 0.0,
+        "use_batch_norm": True,
+        "hidden_units": 16,
+        "skip_connection": True,
+        "bounding_parameter": 10,
+        "layer_type": LayerTypeBronze.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "concept_embedding_size": 256,
+        "concept_temperature": 0.1,
+        "entropy_loss_scaling": 0.2,
+        "early_stopping": True,
+        "loss_mode": LossMode.CROSS_ENTROPY,
+        "train_decision_tree": True,
+        "aggregation_mode": AggregationMode.BRONZE_AGE_COMPARISON,
+        "teacher_max_epochs": 15,
+        "train_concept_model": True,
+        "student_layer_type": LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+        "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(
+        experiment_title, [DatasetEnum.SIMPLE_SATURATION] + ALL_DATASETS, **specific_config
+    )
+
 
 run_dcr_ablation_study = lambda: run_ablation_study(
     LayerTypeBronze.DEEP_CONCEPT_REASONER
@@ -409,8 +504,13 @@ ablation_studies = [
 
 base_tests = [run_stoneage, run_bronzeage_dcr, run_bronzeage_cmr]
 
+explain_runs = [
+    run_simple_saturation_stone_age,
+    run_simple_saturation_bronze_age_dcr,
+    run_simple_saturation_bronze_age_cmr,
+]
 if __name__ == "__main__":
-    for exp in [run_dcr_ablation_study_reverse]:
+    for exp in [run_student_teacher_training_bronze]:
         try:
             exp()
         except Exception as e:

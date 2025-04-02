@@ -795,6 +795,7 @@ class BronzeAgeGNN(torch.nn.Module):
             mode="min",
         )
         trainer = lightning.Trainer(
+            accelerator="cpu",
             max_epochs=config.teacher_max_epochs,
             log_every_n_steps=1,
             enable_progress_bar=True,
