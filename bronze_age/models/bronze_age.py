@@ -404,33 +404,50 @@ class BronzeAgeGNNLayer(MessagePassing):
 
     def aggregate(self, inputs, index, ptr, dim_size):
         message_sums = super().aggregate(inputs, index, ptr=ptr, dim_size=dim_size)
-        clamped_sum = torch.clamp(message_sums, min=0, max=self.bounding_parameter)
-
-        states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
-        states = F.sigmoid(self.a * states)
-        states = states.view(*states.shape[:-2], -1)
-
-        rounded_states = states + states.detach().round().float() - states.detach()
-
-        neighbors_difference: torch.Tensor = F.sigmoid(
-            self.config.a
-            * (clamped_sum[..., :, None] - clamped_sum[..., None, :] - 0.5)
+        calculate_clamped_sum = lambda message_sums: torch.clamp(
+            message_sums, min=0, max=self.bounding_parameter
         )
-        neighbors_difference = neighbors_difference[
-            :, ~np.eye(neighbors_difference.shape[-1], dtype=bool)
-        ].reshape(neighbors_difference.shape[0], -1)
-        neighbors_difference = torch.cat((states, neighbors_difference), dim=-1)
+
+        def calculate_states(clamped_sum):
+            states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
+            states = F.sigmoid(self.a * states)
+            states = states.view(*states.shape[:-2], -1)
+            return states
+
+        def calculate_states_rounded(states):
+            return states + states.detach().round().float() - states.detach()
+
+        def calculate_neighbors_difference(clamped_sum, states):
+            neighbors_difference: torch.Tensor = F.sigmoid(
+                self.config.a
+                * (clamped_sum[..., :, None] - clamped_sum[..., None, :] - 0.5)
+            )
+            neighbors_difference = neighbors_difference[
+                :, ~np.eye(neighbors_difference.shape[-1], dtype=bool)
+            ].reshape(neighbors_difference.shape[0], -1)
+            neighbors_difference = torch.cat((states, neighbors_difference), dim=-1)
+            return neighbors_difference
+
+        clamped_sum = calculate_clamped_sum(message_sums)
 
         if self.inputs_list is not None:
+            states = calculate_states(clamped_sum)
+            rounded_states = calculate_states_rounded(states)
+            neighbors_difference = calculate_neighbors_difference(clamped_sum, states)
             return clamped_sum, states, rounded_states, neighbors_difference
 
         if self.config.aggregation_mode == AggregationMode.STONE_AGE:
             return clamped_sum
         elif self.config.aggregation_mode == AggregationMode.BRONZE_AGE_COMPARISON:
+            states = calculate_states(clamped_sum)
+            neighbors_difference = calculate_neighbors_difference(clamped_sum, states)
             return neighbors_difference
         elif self.config.aggregation_mode == AggregationMode.BRONZE_AGE:
+            states = calculate_states(clamped_sum)
             return states
         elif self.config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
+            states = calculate_states(clamped_sum)
+            rounded_states = calculate_states_rounded(states)
             return rounded_states
         else:
             raise NotImplementedError
