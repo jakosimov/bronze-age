@@ -284,7 +284,7 @@ class ConceptReasonerTrainerModule(lightning.LightningModule):
         loss = 0
         loss = {key: _binary_cross_entropy_loss(y_hat[key], y[key], class_weights=None) for key in y.keys()}
         loss = sum(loss.values()) / len(y)
-        final_loss = loss + 0.3 * aux_loss
+        final_loss = loss + 0.1 * aux_loss
         self.log(
             "train_loss_trainer_aux",
             aux_loss,
@@ -358,8 +358,6 @@ class BronzeAgeGNNLayer(MessagePassing):
             states = F.elu(clamped_sum[..., None] - self._Y_range) - 0.5
             states = F.sigmoid(self.a * states)
             states = states.view(*states.shape[:-2], -1)
-            if self.config.aggregation_mode == AggregationMode.BRONZE_AGE_ROUNDED:
-                states = states + states.detach().round().float() - states.detach()
             if self.config.aggregation_mode == AggregationMode.BRONZE_AGE_COMPARISON:
                 neighbors_difference = F.sigmoid(self.config.a*(clamped_sum[..., :, None] - clamped_sum[..., None, :] - 0.5))
                 neighbors_difference = neighbors_difference[
@@ -550,12 +548,28 @@ class BronzeAgeGNN(torch.nn.Module):
             # we simply repeat the output dataset until it has the same number of samples as the input
             # this is necessary when pooling
             num_repeats = (len(inputs_train["input"]) // len(inputs_train["output"])) + 1
-            inputs_train["output"] = np.tile(inputs_train["output"], (num_repeats, 1))[
-                : len(inputs_train["input"])
-            ]
-            outputs_train["output"] = np.tile(outputs_train["output"], (num_repeats))[
-                : len(inputs_train["input"])
-            ]
+            inputs_train["output"] = np.repeat(
+                inputs_train["output"], num_repeats, axis=0
+            )[: len(inputs_train["input"])]
+
+            outputs_train["output"] = np.repeat(
+                outputs_train["output"], num_repeats, axis=0
+            )[: len(inputs_train["input"])]
+
+        if self.config.num_recurrent_iterations > 1:
+            num_repeats = self.config.num_recurrent_iterations
+            inputs_train["input"] = np.repeat(
+                inputs_train["input"], num_repeats, axis=0
+            )
+            inputs_train["output"] = np.repeat(
+                inputs_train["output"], num_repeats, axis=0
+            )
+            outputs_train["input"] = np.repeat(
+                outputs_train["input"], num_repeats, axis=0
+            )
+            outputs_train["output"] = np.repeat(
+                outputs_train["output"], num_repeats, axis=0
+            )
         return inputs_train, outputs_train
 
     def train_concept_model(self, train_loader, experiment_title=""):

@@ -525,6 +525,7 @@ class MemoryBasedReasonerModule(torch.nn.Module):
         neg_rules = agg_rules[..., 1]
         irr_rules = agg_rules[..., 2]
         x = x[..., None, :]
+        x = x.clamp(0.001, 0.999)
         # batch_dim, n_classes, n_concepts
         preds = (pos_rules * x + neg_rules * (1 - x) + irr_rules).prod(dim=-1)
         preds = preds.clamp(0.001, 0.999)
