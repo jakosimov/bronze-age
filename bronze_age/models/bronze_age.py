@@ -280,11 +280,11 @@ class ConceptReasonerTrainerModule(lightning.LightningModule):
 
         res = self(x)
         y_hat = {k: v[0] for k, v in res.items()}
-        aux_loss = sum(v[1] for v in res.values())
+        aux_loss = sum(v[1] for v in res.values()) / len(res)
         loss = 0
         loss = {key: _binary_cross_entropy_loss(y_hat[key], y[key], class_weights=None) for key in y.keys()}
         loss = sum(loss.values()) / len(y)
-        final_loss = loss + 0.2 * aux_loss
+        final_loss = loss + 0.3 * aux_loss
         self.log(
             "train_loss_trainer_aux",
             aux_loss,
@@ -450,10 +450,20 @@ class BronzeAgeGNN(torch.nn.Module):
         if self.use_pooling and config.aggregation_mode in [
             AggregationMode.BRONZE_AGE,
             AggregationMode.BRONZE_AGE_ROUNDED,
+            AggregationMode.BRONZE_AGE_COMPARISON
         ]:
             self.bounding_parameter = config.bounding_parameter
             self.register_buffer("_Y_range", torch.arange(self.bounding_parameter).float())
-            final_layer_inputs = final_layer_inputs * self.bounding_parameter
+            if config.aggregation_mode == AggregationMode.BRONZE_AGE_COMPARISON:
+                num_inputs = (
+                    (self.config.num_recurrent_iterations * num_layers + 1)
+                    if self.skip_connection
+                    else 1
+                )
+                final_layer_inputs = num_inputs * (state_size * self.bounding_parameter + state_size * (state_size - 1))
+            else:
+                final_layer_inputs = final_layer_inputs * self.bounding_parameter 
+            
         self.output = BronzeAgeLayer(
             final_layer_inputs,
             out_channels,
@@ -487,7 +497,6 @@ class BronzeAgeGNN(torch.nn.Module):
                 if iteration == 0:
                     explanations[layer.__name__] = explanation
                 xs.append(x)
-
         if self.use_pooling:
             x = _global_add_pool_with_transformation(x, batch, self.config)
             xs = [_global_add_pool_with_transformation(xi, batch, self.config) for xi in xs]
