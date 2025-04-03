@@ -137,6 +137,10 @@ def run_experiment(experiment_title, datasets, **config_args):
             print(
                 f"Experiment: {experiment_title}, Dataset: {dataset} failed with error: {e}"
             )
+            import traceback
+
+            traceback.print_exc()
+            continue
     save_data_to_csv(
         results, f"results_{experiment_title.replace(' ', '_')}_{start_time}.csv"
     )
@@ -253,75 +257,6 @@ def run_ablation_experiment(
     }
     run_experiment(experiment_title, SYNTHETIC_DATASETS, **specific_config)
 
-def run_ablation_study_reverse(layer_type: LayerTypeBronze):
-    standard_entropy_loss = 0.2
-    layer_title = (
-        "DCR" if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER else "CMR"
-    )
-
-    if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER:
-        run_ablation_experiment(
-            f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, 32 emb size",
-            layer_type,
-            entropy_loss_scaling=standard_entropy_loss,
-            aggregation_mode=AggregationMode.BRONZE_AGE,
-            training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
-            embedding_size=32,
-        )
-
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age, Diff Argmax",
-        layer_type,
-        entropy_loss_scaling=0.0,
-        aggregation_mode=AggregationMode.BRONZE_AGE,
-        training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
-    )
-
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age, Diff Argmax",
-        layer_type,
-        entropy_loss_scaling=standard_entropy_loss,
-        aggregation_mode=AggregationMode.BRONZE_AGE,
-        training_nonlinearity=NonLinearity.DIFFERENTIABLE_ARGMAX,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Comparison",
-        layer_type,
-        entropy_loss_scaling=0.0,
-        aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Comparison",
-        layer_type,
-        entropy_loss_scaling=standard_entropy_loss,
-        aggregation_mode=AggregationMode.BRONZE_AGE_COMPARISON,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Rounded",
-        layer_type,
-        entropy_loss_scaling=0.0,
-        aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Rounded",
-        layer_type,
-        entropy_loss_scaling=standard_entropy_loss,
-        aggregation_mode=AggregationMode.BRONZE_AGE_ROUNDED,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - No Entropy Loss, Bronze Age",
-        layer_type,
-        entropy_loss_scaling=0.0,
-        aggregation_mode=AggregationMode.BRONZE_AGE,
-    )
-    run_ablation_experiment(
-        f"Ablation Study - {layer_title} - Entropy Loss, Bronze Age",
-        layer_type,
-        entropy_loss_scaling=standard_entropy_loss,
-        aggregation_mode=AggregationMode.BRONZE_AGE,
-    )
-
-
 
 def run_ablation_study(layer_type: LayerTypeBronze):
     standard_entropy_loss = 0.2
@@ -390,6 +325,7 @@ def run_ablation_study(layer_type: LayerTypeBronze):
             embedding_size=32,
         )
 
+
 def run_simple_saturation_stone_age():
     experiment_title = "Simple Saturation - Stone Age"
     specific_config = {
@@ -415,9 +351,8 @@ def run_simple_saturation_stone_age():
         "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
         "concept_memory_disjunctions": 4,
     }
-    run_experiment(
-        experiment_title, [DatasetEnum.SIMPLE_SATURATION], **specific_config
-    )
+    run_experiment(experiment_title, [DatasetEnum.SIMPLE_SATURATION], **specific_config)
+
 
 def run_simple_saturation_bronze_age(layer_type: LayerTypeBronze):
     experiment_title = f"Simple Saturation - {layer_type}"
@@ -431,7 +366,9 @@ def run_simple_saturation_bronze_age(layer_type: LayerTypeBronze):
         "layer_type": layer_type,
         "nonlinearity": None,
         "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
-        "concept_embedding_size": 32 if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER else 128,
+        "concept_embedding_size": (
+            32 if layer_type == LayerTypeBronze.DEEP_CONCEPT_REASONER else 128
+        ),
         "concept_temperature": 0.5,
         "entropy_loss_scaling": 0.2,
         "early_stopping": False,
@@ -444,9 +381,8 @@ def run_simple_saturation_bronze_age(layer_type: LayerTypeBronze):
         "student_aggregation_mode": AggregationMode.BRONZE_AGE_ROUNDED,
         "concept_memory_disjunctions": 2,
     }
-    run_experiment(
-        experiment_title, [DatasetEnum.SIMPLE_SATURATION], **specific_config
-    )
+    run_experiment(experiment_title, [DatasetEnum.SIMPLE_SATURATION], **specific_config)
+
 
 run_simple_saturation_bronze_age_dcr = lambda: run_simple_saturation_bronze_age(
     LayerTypeBronze.DEEP_CONCEPT_REASONER
@@ -482,8 +418,55 @@ def run_student_teacher_training_bronze():
         "concept_memory_disjunctions": 4,
     }
     run_experiment(
-        experiment_title, [DatasetEnum.SIMPLE_SATURATION] + ALL_DATASETS, **specific_config
+        experiment_title,
+        [DatasetEnum.SIMPLE_SATURATION] + ALL_DATASETS,
+        **specific_config,
     )
+
+
+def run_student_teacher_training(
+    student_layer_type: LayerTypeBronze, student_aggregation_mode: AggregationMode
+):
+    experiment_title = f"Student Teacher Training Stone Age to {student_aggregation_mode} on {student_layer_type}"
+    specific_config = {
+        "bounding_parameter": 10,
+        "layer_type": LayerTypeBronze.MLP,
+        "nonlinearity": NonLinearity.GUMBEL_SOFTMAX,
+        "evaluation_nonlinearity": NonLinearity.DIFFERENTIABLE_ARGMAX,
+        "concept_embedding_size": 256,
+        "concept_temperature": 0.5,
+        "entropy_loss_scaling": 0.0,
+        "early_stopping": True,
+        "loss_mode": LossMode.CROSS_ENTROPY,
+        "train_decision_tree": False,
+        "aggregation_mode": AggregationMode.STONE_AGE,
+        "teacher_max_epochs": 30,
+        "train_concept_model": True,
+        "student_layer_type": student_layer_type,
+        "student_aggregation_mode": student_aggregation_mode,
+        "concept_memory_disjunctions": 4,
+    }
+    run_experiment(
+        experiment_title,
+        [DatasetEnum.SIMPLE_SATURATION] + ALL_DATASETS,
+        **specific_config,
+    )
+
+
+def run_student_teacher_training_experiments():
+    student_layer_types = [
+        LayerTypeBronze.DEEP_CONCEPT_REASONER,
+        LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER,
+    ]
+    student_aggregation_modes = [
+        AggregationMode.BRONZE_AGE,
+        AggregationMode.BRONZE_AGE_ROUNDED,
+        AggregationMode.BRONZE_AGE_COMPARISON,
+    ]
+
+    for student_layer_type in student_layer_types:
+        for student_aggregation_mode in student_aggregation_modes:
+            run_student_teacher_training(student_layer_type, student_aggregation_mode)
 
 
 run_dcr_ablation_study = lambda: run_ablation_study(
@@ -493,13 +476,10 @@ run_cmr_ablation_study = lambda: run_ablation_study(
     LayerTypeBronze.MEMORY_BASED_CONCEPT_REASONER
 )
 
-run_dcr_ablation_study_reverse = lambda: run_ablation_study_reverse(LayerTypeBronze.DEEP_CONCEPT_REASONER)
-
 ablation_studies = [
     run_dcr_ablation_study,
     run_cmr_ablation_study,
 ]
-
 
 
 base_tests = [run_stoneage, run_bronzeage_dcr, run_bronzeage_cmr]
@@ -509,8 +489,9 @@ explain_runs = [
     run_simple_saturation_bronze_age_dcr,
     run_simple_saturation_bronze_age_cmr,
 ]
+
 if __name__ == "__main__":
-    for exp in [run_student_teacher_training_bronze]:
+    for exp in [run_student_teacher_training_experiments]:
         try:
             exp()
         except Exception as e:

@@ -172,11 +172,14 @@ class BronzeAgeLayer(nn.Module):
         self.outputs_list = None
         self.mask_ref = None
 
+    def apply_mask(self, x):
+        if self.mask_ref is not None and self.mask_ref.current_mask is not None:
+            x = x[self.mask_ref.current_mask]
+        return x
+
     def forward(self, x, return_explanation=False, concept_names=None):
         if self.inputs_list is not None:
-            self.inputs_list.append(
-                x[self.mask_ref.current_mask].detach().cpu().numpy()
-            )
+            self.inputs_list.append(self.apply_mask(x).detach().cpu().numpy())
 
         x1, aux_loss, explanation = self.f(
             x, return_explanation=return_explanation, concept_names=concept_names
@@ -185,9 +188,7 @@ class BronzeAgeLayer(nn.Module):
         x2 = self.non_linearity(x1) if self.training else self.eval_non_linearity(x1)
 
         if self.outputs_list is not None:
-            self.outputs_list.append(
-                x2[self.mask_ref.current_mask].detach().cpu().numpy()
-            )
+            self.outputs_list.append(self.apply_mask(x2).detach().cpu().numpy())
 
         return x2, aux_loss, explanation
 
@@ -396,6 +397,11 @@ class BronzeAgeGNNLayer(MessagePassing):
         self.outputs_list = None
         self.mask_ref = None
 
+    def apply_mask(self, x):
+        if self.mask_ref is not None and self.mask_ref.current_mask is not None:
+            x = x[self.mask_ref.current_mask]
+        return x
+
     def forward(self, x, edge_index, return_explanation=False):
         return self.propagate(edge_index, x=x, return_explanation=return_explanation)
 
@@ -486,10 +492,10 @@ class BronzeAgeGNNLayer(MessagePassing):
             combined_neighbors_difference = torch.cat((x, neighbors_difference), 1)
             self.inputs_list.append(
                 (
-                    combined_clamped[self.mask_ref.current_mask].detach().cpu().numpy(),
-                    combined_states[self.mask_ref.current_mask].detach().cpu().numpy(),
-                    combined_rounded[self.mask_ref.current_mask].detach().cpu().numpy(),
-                    combined_neighbors_difference[self.mask_ref.current_mask]
+                    self.apply_mask(combined_clamped).detach().cpu().numpy(),
+                    self.apply_mask(combined_states).detach().cpu().numpy(),
+                    self.apply_mask(combined_rounded).detach().cpu().numpy(),
+                    self.apply_mask(combined_neighbors_difference)
                     .detach()
                     .cpu()
                     .numpy(),
@@ -513,9 +519,7 @@ class BronzeAgeGNNLayer(MessagePassing):
         )
 
         if self.outputs_list is not None:
-            self.outputs_list.append(
-                output[self.mask_ref.current_mask].detach().cpu().numpy()
-            )
+            self.outputs_list.append(self.apply_mask(output).detach().cpu().numpy())
         return output, aux_loss, explanation
 
 
@@ -651,7 +655,7 @@ class BronzeAgeGNN(torch.nn.Module):
             if hasattr(data, "train_mask"):
                 mask_ref.current_mask = data.train_mask
             else:
-                mask_ref.current_mask = torch.ones(data.x.size(0), dtype=torch.bool)
+                mask_ref.current_mask = None
             self(data.x, data.edge_index, batch=data.batch)
             mask_ref.current_mask = None
 
@@ -679,7 +683,7 @@ class BronzeAgeGNN(torch.nn.Module):
             outputs = outputs_train[key]
             inputs_train[key] = np.concatenate(inputs)
             outputs_train[key] = np.concatenate(
-                [np.argmax(output, axis=-1) for output in outputs]
+                [np.argmax(output, axis=-1, keepdims=False) for output in outputs]
             )
 
         new_inputs_train = {}
@@ -692,7 +696,27 @@ class BronzeAgeGNN(torch.nn.Module):
             new_inputs_train[new_key] = inputs_train[key]
             new_outputs_train[new_key] = outputs_train[key]
 
-        return new_inputs_train, new_outputs_train
+        inputs_train = new_inputs_train
+        outputs_train = new_outputs_train
+
+        MAKE_SAME_LENGTH = True
+        if MAKE_SAME_LENGTH and len(inputs_train["output"]) < len(
+            inputs_train["input"]
+        ):
+            # this is a hack to make sure that the output has the same number of samples as the input
+            # we simply repeat the output dataset until it has the same number of samples as the input
+            # this is necessary when pooling
+            num_repeats = (
+                len(inputs_train["input"]) // len(inputs_train["output"])
+            ) + 1
+            inputs_train["output"] = np.tile(inputs_train["output"], (num_repeats, 1))[
+                : len(inputs_train["input"])
+            ]
+            outputs_train["output"] = np.tile(outputs_train["output"], (num_repeats))[
+                : len(inputs_train["input"])
+            ]
+
+        return inputs_train, outputs_train
 
     def get_inputs_outputs(self, train_loader):
         inputs_train = defaultdict(list)
@@ -728,6 +752,7 @@ class BronzeAgeGNN(torch.nn.Module):
         for key in inputs_train.keys():
             inputs_train[key] = np.concatenate(inputs_train[key])
             outputs_train[key] = np.concatenate(outputs_train[key])
+
         if len(inputs_train["output"]) < len(inputs_train["input"]):
             # this is a hack to make sure that the output has the same number of samples as the input
             # we simply repeat the output dataset until it has the same number of samples as the input
@@ -741,11 +766,12 @@ class BronzeAgeGNN(torch.nn.Module):
             outputs_train["output"] = np.tile(outputs_train["output"], (num_repeats))[
                 : len(inputs_train["input"])
             ]
+
         return inputs_train, outputs_train
 
     def train_concept_model(self, train_loader, experiment_title=""):
         final_model = deepcopy(self)
-        config = deepcopy(self.config)
+        config = final_model.config
         student_aggregation_mode = (
             config.student_aggregation_mode or config.aggregation_mode
         )
@@ -790,7 +816,7 @@ class BronzeAgeGNN(torch.nn.Module):
 
         early_stopping = EarlyStopping(
             monitor="train_loss_trainer_teacher",
-            patience=2,
+            patience=5,
             stopping_threshold=0.001,
             mode="min",
         )
